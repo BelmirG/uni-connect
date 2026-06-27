@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.pytest_cache/
+
+# Node
+node_modules/
+.next/
+
+# Environment — never commit real secrets
+.env
+.env.local
+.env.*.local
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code — AI assistant config and session data
+CLAUDE.md
+.claude/
+
+# Personal / dev-only files
+photos/

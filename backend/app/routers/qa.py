@@ -1,0 +1,306 @@
+import uuid
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import and_, case, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
+
+from app.database import get_db
+from app.dependencies import get_current_user
+from app.models.anonymous_post_author import AnonymousPostAuthor
+from app.models.post import Post
+from app.models.user import User
+from app.models.vote import Vote
+from app.schemas.qa import CreateQAPostRequest, QAListResponse, QAPostResponse
+
+router = APIRouter(prefix="/api/qa", tags=["qa"])
+
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+def _build_qa_select(extra_where=None):
+    """
+    Select posts with aggregated vote + reply counts.
+    Deliberately does NOT join the users table — author identity is never
+    loaded, so it cannot accidentally appear in any serialized response.
+    """
+    ReplyAlias = aliased(Post)
+    stmt = (
+        select(
+            Post,
+            func.count(case((Vote.vote_type == "up", 1))).label("upvotes"),
+            func.count(case((Vote.vote_type == "down", 1))).label("downvotes"),
+            func.count(ReplyAlias.id).label("reply_count"),
+        )
+        .outerjoin(Vote, Vote.post_id == Post.id)
+        .outerjoin(
+            ReplyAlias,
+            and_(ReplyAlias.parent_post_id == Post.id, ReplyAlias.is_deleted == False),
+        )
+        .group_by(Post.id)
+    )
+    if extra_where is not None:
+        stmt = stmt.where(extra_where)
+    return stmt
+
+
+def _row_to_response(row, current_vote: str | None) -> QAPostResponse:
+    post, upvotes, downvotes, reply_count = row
+    return QAPostResponse(
+        id=post.id,
+        content="[deleted]" if post.is_deleted else post.content,
+        upvotes=upvotes or 0,
+        downvotes=downvotes or 0,
+        current_user_vote=current_vote,
+        reply_count=reply_count or 0,
+        created_at=post.created_at,
+        is_deleted=post.is_deleted,
+        parent_post_id=post.parent_post_id,
+    )
+
+
+async def _user_votes_for(
+    post_ids: list[uuid.UUID], user_id: uuid.UUID, db: AsyncSession
+) -> dict[uuid.UUID, str]:
+    if not post_ids:
+        return {}
+    result = await db.execute(
+        select(Vote.post_id, Vote.vote_type).where(
+            Vote.post_id.in_(post_ids), Vote.user_id == user_id
+        )
+    )
+    return {row.post_id: row.vote_type for row in result}
+
+
+async def _vote_counts(
+    post_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession
+) -> dict:
+    row = (
+        await db.execute(
+            select(
+                func.count(case((Vote.vote_type == "up", 1))).label("upvotes"),
+                func.count(case((Vote.vote_type == "down", 1))).label("downvotes"),
+            ).where(Vote.post_id == post_id)
+        )
+    ).first()
+    current = (
+        await db.execute(
+            select(Vote.vote_type).where(
+                Vote.post_id == post_id, Vote.user_id == user_id
+            )
+        )
+    ).scalar_one_or_none()
+    return {
+        "upvotes": row.upvotes or 0,
+        "downvotes": row.downvotes or 0,
+        "current_user_vote": current,
+    }
+
+
+# ── endpoints ─────────────────────────────────────────────────────────────────
+
+@router.post("", status_code=status.HTTP_201_CREATED, response_model=QAPostResponse)
+async def create_question(
+    body: CreateQAPostRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Post an anonymous question.
+
+    author_id is intentionally NULL — the posts table holds no trace of the
+    real author. The real author is written to anonymous_post_authors in the
+    same database transaction so moderation is always possible.
+    """
+    post = Post(
+        author_id=None,        # ← no author in the posts table
+        content=body.content,
+        post_type="anonymous_qa",
+        is_anonymous=True,
+    )
+    db.add(post)
+    await db.flush()  # generate post.id before committing
+
+    # Privacy compartment: real author stored separately, never joined publicly
+    db.add(AnonymousPostAuthor(post_id=post.id, user_id=current_user.id))
+    await db.commit()
+    await db.refresh(post)
+
+    return QAPostResponse(
+        id=post.id,
+        content=post.content,
+        upvotes=0,
+        downvotes=0,
+        current_user_vote=None,
+        reply_count=0,
+        created_at=post.created_at,
+        is_deleted=False,
+        parent_post_id=None,
+    )
+
+
+@router.get("", response_model=QAListResponse)
+async def list_questions(
+    limit: int = 20,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    where = and_(
+        Post.post_type == "anonymous_qa",
+        Post.parent_post_id.is_(None),
+        Post.is_deleted == False,
+    )
+    rows = (
+        await db.execute(
+            _build_qa_select(where).order_by(Post.created_at.desc()).limit(limit).offset(offset)
+        )
+    ).all()
+
+    total = (await db.execute(select(func.count(Post.id)).where(where))).scalar() or 0
+    votes = await _user_votes_for([r[0].id for r in rows], current_user.id, db)
+
+    return QAListResponse(
+        posts=[_row_to_response(r, votes.get(r[0].id)) for r in rows],
+        total=total,
+    )
+
+
+@router.get("/{post_id}")
+async def get_question(
+    post_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    row = (await db.execute(_build_qa_select(Post.id == post_id))).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Post not found.")
+
+    vote_map = await _user_votes_for([post_id], current_user.id, db)
+    question = _row_to_response(row, vote_map.get(post_id))
+
+    answer_rows = (
+        await db.execute(
+            _build_qa_select(Post.parent_post_id == post_id).order_by(Post.created_at.asc())
+        )
+    ).all()
+    answer_votes = await _user_votes_for([r[0].id for r in answer_rows], current_user.id, db)
+    answers = [_row_to_response(r, answer_votes.get(r[0].id)) for r in answer_rows]
+
+    return {"question": question, "answers": answers}
+
+
+@router.post("/{post_id}/answers", status_code=status.HTTP_201_CREATED, response_model=QAPostResponse)
+async def create_answer(
+    post_id: uuid.UUID,
+    body: CreateQAPostRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    parent = (
+        await db.execute(
+            select(Post).where(Post.id == post_id, Post.is_deleted == False)
+        )
+    ).scalar_one_or_none()
+    if not parent:
+        raise HTTPException(status_code=404, detail="Post not found.")
+    if parent.post_type != "anonymous_qa":
+        raise HTTPException(status_code=400, detail="Can only answer Q&A posts here.")
+
+    answer = Post(
+        author_id=None,
+        content=body.content,
+        post_type="anonymous_qa",
+        is_anonymous=True,
+        parent_post_id=post_id,
+    )
+    db.add(answer)
+    await db.flush()
+
+    db.add(AnonymousPostAuthor(post_id=answer.id, user_id=current_user.id))
+    await db.commit()
+    await db.refresh(answer)
+
+    return QAPostResponse(
+        id=answer.id,
+        content=answer.content,
+        upvotes=0,
+        downvotes=0,
+        current_user_vote=None,
+        reply_count=0,
+        created_at=answer.created_at,
+        is_deleted=False,
+        parent_post_id=post_id,
+    )
+
+
+@router.post("/{post_id}/vote")
+async def vote_post(
+    post_id: uuid.UUID,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    vote_type = body.get("vote_type")
+    if vote_type not in ("up", "down"):
+        raise HTTPException(status_code=422, detail="vote_type must be 'up' or 'down'.")
+
+    if not (
+        await db.execute(select(Post.id).where(Post.id == post_id, Post.is_deleted == False))
+    ).scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Post not found.")
+
+    existing = (
+        await db.execute(
+            select(Vote).where(Vote.post_id == post_id, Vote.user_id == current_user.id)
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        if existing.vote_type == vote_type:
+            await db.delete(existing)
+        else:
+            existing.vote_type = vote_type
+    else:
+        db.add(Vote(post_id=post_id, user_id=current_user.id, vote_type=vote_type))
+
+    await db.commit()
+    return await _vote_counts(post_id, current_user.id, db)
+
+
+@router.delete("/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_post(
+    post_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Only admins or the real author (looked up via anonymous_post_authors) can
+    delete an anonymous post. Regular users cannot delete others' posts even
+    if they happen to know the post ID.
+    """
+    post = (
+        await db.execute(
+            select(Post).where(Post.id == post_id, Post.is_deleted == False)
+        )
+    ).scalar_one_or_none()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found.")
+
+    # Check authorship via the privacy table — not the posts table
+    is_author = (
+        await db.execute(
+            select(AnonymousPostAuthor.post_id).where(
+                AnonymousPostAuthor.post_id == post_id,
+                AnonymousPostAuthor.user_id == current_user.id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if not is_author and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Not authorised.")
+
+    post.is_deleted = True
+    post.deleted_at = datetime.now(timezone.utc)
+    await db.commit()
