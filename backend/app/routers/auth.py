@@ -1,0 +1,136 @@
+import secrets
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
+from app.core.email import send_verification_email
+from app.core.security import create_access_token, hash_password, verify_password
+from app.database import get_db
+from app.dependencies import get_current_user
+from app.models.user import User
+from app.schemas.auth import LoginRequest, RegisterRequest, UserResponse
+
+router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+ALLOWED_DOMAIN = "student.ius.edu.ba"
+
+
+def _enforce_university_email(email: str) -> None:
+    if not email.lower().endswith(f"@{ALLOWED_DOMAIN}"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Only @{ALLOWED_DOMAIN} email addresses are accepted.",
+        )
+
+
+@router.post("/register", status_code=status.HTTP_201_CREATED)
+async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    _enforce_university_email(body.email)
+
+    # Reject duplicates with separate messages so the user knows which field conflicts.
+    existing_email = await db.execute(
+        select(User).where(User.email == body.email.lower())
+    )
+    if existing_email.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Email already registered.")
+
+    existing_username = await db.execute(
+        select(User).where(User.username == body.username)
+    )
+    if existing_username.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Username already taken.")
+
+    token = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(hours=24)
+
+    user = User(
+        email=body.email.lower(),
+        username=body.username,
+        display_name=body.display_name,
+        password_hash=hash_password(body.password),
+        email_verification_token=token,
+        email_verification_expires_at=expires,
+    )
+    db.add(user)
+    await db.commit()
+
+    send_verification_email(body.email, token)
+
+    return {"message": "Account created. Check your email to verify before logging in."}
+
+
+@router.get("/verify-email")
+async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(User).where(User.email_verification_token == token)
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid verification token.")
+
+    expires = user.email_verification_expires_at
+    # Normalize to timezone-aware for comparison regardless of DB driver behavior
+    if expires is not None and expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+
+    if expires is None or expires < datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=400,
+            detail="Verification token has expired. Please register again or request a new link.",
+        )
+
+    user.is_email_verified = True
+    user.email_verification_token = None
+    user.email_verification_expires_at = None
+    await db.commit()
+
+    return {"message": "Email verified. You can now log in."}
+
+
+@router.post("/login")
+async def login(
+    body: LoginRequest, response: Response, db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(select(User).where(User.email == body.email.lower()))
+    user = result.scalar_one_or_none()
+
+    # Use the same error for "not found" and "wrong password" — don't leak which is true.
+    if not user or not verify_password(body.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    if not user.is_email_verified:
+        raise HTTPException(
+            status_code=403,
+            detail="Please verify your email before logging in.",
+        )
+
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="This account has been suspended.")
+
+    token = create_access_token(str(user.id))
+
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,       # JS cannot read this — prevents XSS token theft
+        samesite="lax",      # safe against CSRF for same-site navigations
+        max_age=settings.access_token_expire_minutes * 60,
+        secure=False,        # must be True in production (HTTPS only)
+    )
+
+    return UserResponse.model_validate(user)
+
+
+@router.post("/logout")
+async def logout(response: Response):
+    response.delete_cookie(key="access_token")
+    return {"message": "Logged out."}
+
+
+@router.get("/me", response_model=UserResponse)
+async def me(current_user: User = Depends(get_current_user)):
+    return current_user
