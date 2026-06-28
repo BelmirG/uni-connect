@@ -29,6 +29,7 @@ class UpdateProfileRequest(BaseModel):
     bio: str = Field(default="", max_length=300)
     faculty: FacultyLiteral = None
     program: Optional[str] = Field(default=None, max_length=200)
+    avatar_url: Optional[str] = Field(default=None, max_length=500)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -116,6 +117,8 @@ async def update_profile(
     current_user.bio = body.bio.strip() or None
     current_user.faculty = body.faculty or None
     current_user.program = body.program.strip() if body.program else None
+    if body.avatar_url is not None:
+        current_user.avatar_url = body.avatar_url or None
     await db.commit()
     await db.refresh(current_user)
     return {
@@ -124,6 +127,7 @@ async def update_profile(
         "bio": current_user.bio,
         "faculty": current_user.faculty,
         "program": current_user.program,
+        "avatar_url": current_user.avatar_url,
     }
 
 
@@ -167,6 +171,7 @@ async def get_profile(
         "bio": target.bio,
         "faculty": target.faculty,
         "program": target.program,
+        "avatar_url": target.avatar_url,
         "member_since": target.created_at.isoformat(),
         "post_count": post_count,
         "club_count": club_count,
@@ -226,6 +231,57 @@ async def get_user_clubs(
         }
         for club, role in rows
     ]
+
+
+@router.delete("/me/followers/{username}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_follower(
+    username: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Remove someone from your followers list (force-unfollow you)."""
+    follower = await _get_active_user(username, db)
+    existing = (await db.execute(
+        select(Follow).where(
+            Follow.follower_id == follower.id,
+            Follow.following_id == current_user.id,
+        )
+    )).scalar_one_or_none()
+    if existing:
+        await db.delete(existing)
+        await db.commit()
+
+
+@router.get("/{username}/followers")
+async def get_followers(
+    username: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    target = await _get_active_user(username, db)
+    rows = (await db.execute(
+        select(User)
+        .join(Follow, Follow.follower_id == User.id)
+        .where(Follow.following_id == target.id)
+        .order_by(Follow.created_at.desc())
+    )).scalars().all()
+    return [{"username": u.username, "display_name": u.display_name, "avatar_url": u.avatar_url} for u in rows]
+
+
+@router.get("/{username}/following")
+async def get_following(
+    username: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    target = await _get_active_user(username, db)
+    rows = (await db.execute(
+        select(User)
+        .join(Follow, Follow.following_id == User.id)
+        .where(Follow.follower_id == target.id)
+        .order_by(Follow.created_at.desc())
+    )).scalars().all()
+    return [{"username": u.username, "display_name": u.display_name, "avatar_url": u.avatar_url} for u in rows]
 
 
 @router.post("/{username}/follow", status_code=status.HTTP_204_NO_CONTENT)

@@ -13,6 +13,16 @@ import { ImageGrid } from "@/components/ImageGrid";
 interface Author {
   username: string;
   display_name: string;
+  avatar_url: string | null;
+}
+
+function MiniAvatar({ name, url, size = 30 }: { name: string; url: string | null; size?: number }) {
+  if (url) return <img src={url} alt="" style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />;
+  return (
+    <div style={{ width: size, height: size, borderRadius: "50%", background: "#111", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.35, fontWeight: "bold", flexShrink: 0 }}>
+      {(name || "?")[0].toUpperCase()}
+    </div>
+  );
 }
 
 interface Post {
@@ -169,12 +179,17 @@ function CommentNode({ node, depth }: { node: TreeNode; depth: number }) {
           <p style={{ color: "#bbb", margin: "0 0 0.5rem", fontStyle: "italic", fontSize: "0.88rem" }}>[deleted]</p>
         ) : (
           <>
-            <div style={{ fontSize: "0.8rem", color: "#888", marginBottom: "0.25rem" }}>
-              <Link href={`/profile/${p.author?.username}`} style={{ color: "inherit", textDecoration: "none" }}>
-                <strong style={{ color: "#333" }}>{p.author?.display_name ?? "Unknown"}</strong>{" "}
-                @{p.author?.username ?? "?"}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", marginBottom: "0.35rem" }}>
+              <Link href={`/profile/${p.author?.username}`} style={{ flexShrink: 0 }}>
+                <MiniAvatar name={p.author?.display_name ?? "?"} url={p.author?.avatar_url ?? null} size={26} />
               </Link>
-              {" · "}{timeAgo(p.created_at)}
+              <div style={{ fontSize: "0.8rem", color: "#888" }}>
+                <Link href={`/profile/${p.author?.username}`} style={{ color: "inherit", textDecoration: "none" }}>
+                  <strong style={{ color: "#333" }}>{p.author?.display_name ?? "Unknown"}</strong>{" "}
+                  @{p.author?.username ?? "?"}
+                </Link>
+                {" · "}{timeAgo(p.created_at)}
+              </div>
             </div>
             <ImageGrid urls={p.image_urls ?? []} />
             {p.content && (
@@ -264,6 +279,7 @@ export default function PostDetailPage() {
   const [topUploaderKey, setTopUploaderKey] = useState(0);
   const [topSubmitting, setTopSubmitting] = useState(false);
   const [topError, setTopError] = useState<string | null>(null);
+  const [composerOpen, setComposerOpen] = useState(false);
 
   // Inline reply form (reply to a specific comment)
   const [replyingToId, setReplyingToId] = useState<string | null>(null);
@@ -325,6 +341,7 @@ export default function PostDetailPage() {
       setTopContent("");
       setTopImageUrls([]);
       setTopUploaderKey((k) => k + 1);
+      setComposerOpen(false);
     } catch (err: unknown) {
       setTopError(err instanceof Error ? err.message : "Failed to post comment.");
     } finally {
@@ -389,7 +406,7 @@ export default function PostDetailPage() {
 
   return (
     <Ctx.Provider value={ctxValue}>
-      <main style={{ maxWidth: 640, margin: "0 auto", padding: "1.5rem 1rem" }}>
+      <main style={{ maxWidth: 640, margin: "0 auto", padding: "1.5rem 1rem 5rem" }}>
         <Link href="/feed" style={{ fontSize: "0.9rem" }}>← Back to feed</Link>
 
         {/* Original post */}
@@ -398,17 +415,24 @@ export default function PostDetailPage() {
             <p style={{ color: "#aaa", margin: 0, fontStyle: "italic" }}>[deleted]</p>
           ) : (
             <>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.85rem", color: "#666", marginBottom: "0.5rem", flexWrap: "wrap" }}>
-                <Link href={`/profile/${post.author?.username}`} style={{ color: "inherit", textDecoration: "none" }}>
-                  <strong style={{ color: "#222" }}>{post.author?.display_name ?? "Unknown"}</strong>{" "}
-                  @{post.author?.username ?? "?"}
+              <div style={{ display: "flex", alignItems: "center", gap: "0.55rem", marginBottom: "0.6rem" }}>
+                <Link href={`/profile/${post.author?.username}`} style={{ flexShrink: 0 }}>
+                  <MiniAvatar name={post.author?.display_name ?? "?"} url={post.author?.avatar_url ?? null} size={36} />
                 </Link>
-                <span>· {timeAgo(post.created_at)}</span>
-                {post.faculty_tag && (
-                  <span style={{ fontSize: "0.72rem", fontWeight: "bold", padding: "0.15rem 0.5rem", borderRadius: 12, background: "#f0f0f0", color: "#444" }}>
-                    {post.faculty_tag}
-                  </span>
-                )}
+                <div style={{ flex: 1 }}>
+                  <Link href={`/profile/${post.author?.username}`} style={{ color: "inherit", textDecoration: "none", fontSize: "0.88rem" }}>
+                    <strong style={{ color: "#222" }}>{post.author?.display_name ?? "Unknown"}</strong>{" "}
+                    <span style={{ color: "#999" }}>@{post.author?.username ?? "?"}</span>
+                  </Link>
+                  <div style={{ fontSize: "0.78rem", color: "#bbb", display: "flex", gap: "0.4rem", alignItems: "center" }}>
+                    <span>{timeAgo(post.created_at)}</span>
+                    {post.faculty_tag && (
+                      <span style={{ fontSize: "0.72rem", fontWeight: "bold", padding: "0.1rem 0.45rem", borderRadius: 12, background: "#f0f0f0", color: "#444" }}>
+                        {post.faculty_tag}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
               <ImageGrid urls={post.image_urls ?? []} />
               {post.content && (
@@ -426,29 +450,6 @@ export default function PostDetailPage() {
           )}
         </div>
 
-        {/* Top-level comment form */}
-        <form onSubmit={handleTopReply} style={{ margin: "1rem 0 1.5rem" }}>
-          <textarea
-            value={topContent}
-            onChange={(e) => setTopContent(e.target.value)}
-            placeholder="Add a comment…"
-            rows={3}
-            style={{ width: "100%", boxSizing: "border-box", padding: "0.6rem", fontSize: "0.95rem", border: "1px solid #ccc", borderRadius: 4, fontFamily: "inherit", resize: "vertical" }}
-          />
-          <ImageUploader
-            key={topUploaderKey}
-            onUrlsChange={(urls, uploading) => { setTopImageUrls(urls); setTopImagesUploading(uploading); }}
-          />
-          {topError && <p style={{ color: "crimson", margin: "0.25rem 0", fontSize: "0.9rem" }}>{topError}</p>}
-          <button
-            type="submit"
-            disabled={topSubmitting || topImagesUploading || (!topContent.trim() && !topImageUrls.length)}
-            style={{ marginTop: "0.5rem", padding: "0.5rem 1.2rem", cursor: "pointer" }}
-          >
-            {topImagesUploading ? "Uploading…" : topSubmitting ? "Posting…" : "Comment"}
-          </button>
-        </form>
-
         {/* Comment count + thread */}
         <div style={{ borderTop: "1px solid #eee", paddingTop: "0.75rem" }}>
           <h3 style={{ color: "#444", marginTop: 0, marginBottom: "1rem" }}>
@@ -459,6 +460,52 @@ export default function PostDetailPage() {
           ))}
         </div>
       </main>
+
+      {/* Fixed compose bar */}
+      <div style={{ position: "fixed", bottom: 60, left: 0, right: 0, background: "#fff", borderTop: "1px solid #e8e8e8", padding: "0.5rem 1rem", zIndex: 50 }}>
+        <div
+          onClick={() => setComposerOpen(true)}
+          style={{ maxWidth: 640, margin: "0 auto", display: "flex", alignItems: "center", padding: "0.6rem 1rem", borderRadius: 20, background: "#f5f5f5", cursor: "text", color: "#aaa", fontSize: "0.95rem" }}
+        >
+          Add a comment…
+        </div>
+      </div>
+
+      {composerOpen && (
+        <>
+          <div onClick={() => setComposerOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 100 }} />
+          <div style={{ position: "fixed", bottom: 60, left: 0, right: 0, background: "#fff", borderRadius: "16px 16px 0 0", padding: "1rem 1rem 1.5rem", zIndex: 101, maxHeight: "80vh", overflowY: "auto", boxShadow: "0 -4px 24px rgba(0,0,0,0.12)" }}>
+            <div style={{ maxWidth: 640, margin: "0 auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                <span style={{ fontWeight: "600", fontSize: "1rem" }}>Add a comment</span>
+                <button onClick={() => setComposerOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "1.5rem", color: "#999", lineHeight: 1, padding: "0 0.2rem" }}>×</button>
+              </div>
+              <form onSubmit={handleTopReply}>
+                <textarea
+                  autoFocus
+                  value={topContent}
+                  onChange={(e) => setTopContent(e.target.value)}
+                  placeholder="Add a comment…"
+                  rows={4}
+                  style={{ width: "100%", boxSizing: "border-box", padding: "0.6rem", fontSize: "0.95rem", border: "1px solid #ccc", borderRadius: 4, fontFamily: "inherit", resize: "vertical" }}
+                />
+                <ImageUploader
+                  key={topUploaderKey}
+                  onUrlsChange={(urls, uploading) => { setTopImageUrls(urls); setTopImagesUploading(uploading); }}
+                />
+                {topError && <p style={{ color: "crimson", margin: "0.25rem 0", fontSize: "0.9rem" }}>{topError}</p>}
+                <button
+                  type="submit"
+                  disabled={topSubmitting || topImagesUploading || (!topContent.trim() && !topImageUrls.length)}
+                  style={{ marginTop: "0.5rem", padding: "0.5rem 1.2rem", cursor: "pointer" }}
+                >
+                  {topImagesUploading ? "Uploading…" : topSubmitting ? "Posting…" : "Comment"}
+                </button>
+              </form>
+            </div>
+          </div>
+        </>
+      )}
     </Ctx.Provider>
   );
 }
