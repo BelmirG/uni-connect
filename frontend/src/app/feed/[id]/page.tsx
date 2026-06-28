@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import { apiFetch, ApiError } from "@/lib/api";
 import UserSearchInput from "@/components/UserSearchInput";
+import { FACULTY_NAMES, Faculty } from "@/lib/faculties";
 
 interface Author {
   username: string;
@@ -14,6 +15,7 @@ interface Author {
 interface Post {
   id: string;
   content: string;
+  faculty_tag: string | null;
   author: Author | null;
   upvotes: number;
   downvotes: number;
@@ -138,9 +140,16 @@ export default function PostDetailPage() {
           <p style={{ color: "#aaa", margin: 0, fontStyle: "italic" }}>[deleted]</p>
         ) : (
           <>
-            <div style={{ fontSize: "0.85rem", color: "#666", marginBottom: "0.5rem" }}>
-              <strong style={{ color: "#222" }}>{post.author?.display_name ?? "Unknown"}</strong>{" "}
-              @{post.author?.username ?? "?"} · {timeAgo(post.created_at)}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.85rem", color: "#666", marginBottom: "0.5rem" }}>
+              <span>
+                <strong style={{ color: "#222" }}>{post.author?.display_name ?? "Unknown"}</strong>{" "}
+                @{post.author?.username ?? "?"} · {timeAgo(post.created_at)}
+              </span>
+              {post.faculty_tag && (
+                <span style={{ fontSize: "0.72rem", fontWeight: "bold", padding: "0.15rem 0.5rem", borderRadius: 12, background: "#f0f0f0", color: "#444" }}>
+                  {post.faculty_tag}
+                </span>
+              )}
             </div>
             <p style={{ margin: "0 0 0.75rem", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
               {post.content}

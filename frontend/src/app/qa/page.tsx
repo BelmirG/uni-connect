@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { FACULTIES, FACULTY_NAMES, Faculty } from "@/lib/faculties";
 
 interface QAPost {
   id: string;
   content: string;
+  faculty_tag: string | null;
   upvotes: number;
   downvotes: number;
   current_user_vote: "up" | "down" | null;
@@ -34,21 +36,37 @@ function timeAgo(iso: string): string {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+function FacultyBadge({ tag }: { tag: string }) {
+  return (
+    <span style={{
+      fontSize: "0.72rem", fontWeight: "bold", letterSpacing: "0.03em",
+      padding: "0.15rem 0.5rem", borderRadius: 12,
+      background: "#f0f0f0", color: "#444",
+    }}>
+      {tag}
+    </span>
+  );
+}
+
 export default function QAPage() {
   const router = useRouter();
   const [posts, setPosts] = useState<QAPost[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [content, setContent] = useState("");
+  const [facultyTag, setFacultyTag] = useState<Faculty | "">("");
+  const [facultyFilter, setFacultyFilter] = useState<Faculty | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch<QAListResponse>("/api/qa")
+    setLoading(true);
+    const param = facultyFilter ? `?faculty=${facultyFilter}` : "";
+    apiFetch<QAListResponse>(`/api/qa${param}`)
       .then((data) => { setPosts(data.posts); setTotal(data.total); })
       .catch(() => router.replace("/login"))
       .finally(() => setLoading(false));
-  }, [router]);
+  }, [facultyFilter, router]);
 
   async function handlePost(e: React.FormEvent) {
     e.preventDefault();
@@ -58,11 +76,12 @@ export default function QAPage() {
     try {
       const newPost = await apiFetch<QAPost>("/api/qa", {
         method: "POST",
-        body: JSON.stringify({ content: content.trim() }),
+        body: JSON.stringify({ content: content.trim(), faculty_tag: facultyTag || null }),
       });
       setPosts((prev) => [newPost, ...prev]);
       setTotal((t) => t + 1);
       setContent("");
+      setFacultyTag("");
     } catch (err: unknown) {
       setPostError(err instanceof Error ? err.message : "Failed to post.");
     } finally {
@@ -116,29 +135,70 @@ export default function QAPage() {
           rows={3}
           style={textareaStyle}
         />
-        <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginTop: "0.5rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
+          <select
+            value={facultyTag}
+            onChange={(e) => setFacultyTag(e.target.value as Faculty | "")}
+            style={{
+              padding: "0.4rem 0.6rem", fontSize: "0.88rem", border: "1px solid #ccc",
+              borderRadius: 4, fontFamily: "inherit",
+              color: facultyTag ? "#111" : "#888", background: "#fff",
+            }}
+          >
+            <option value="">Tag faculty (optional)</option>
+            {FACULTIES.map((f) => (
+              <option key={f} value={f}>{f} — {FACULTY_NAMES[f]}</option>
+            ))}
+          </select>
+          <span style={{ fontSize: "0.82rem", color: "#999" }}>🔒 Your name will not be shown</span>
           <button
             type="submit"
             disabled={submitting || !content.trim()}
-            style={{ padding: "0.5rem 1.2rem", cursor: "pointer" }}
+            style={{ marginLeft: "auto", padding: "0.5rem 1.2rem", cursor: "pointer" }}
           >
             {submitting ? "Posting…" : "Post anonymously"}
           </button>
-          <span style={{ fontSize: "0.82rem", color: "#999" }}>
-            🔒 Your name will not be shown
-          </span>
         </div>
         {postError && (
-          <p style={{ color: "crimson", margin: "0.4rem 0 0", fontSize: "0.9rem" }}>
-            {postError}
-          </p>
+          <p style={{ color: "crimson", margin: "0.4rem 0 0", fontSize: "0.9rem" }}>{postError}</p>
         )}
       </form>
+
+      {/* Faculty filter pills */}
+      <div style={{ display: "flex", gap: "0.4rem", marginBottom: "1.25rem", flexWrap: "wrap" }}>
+        <button
+          onClick={() => setFacultyFilter(null)}
+          style={{
+            padding: "0.25rem 0.75rem", fontSize: "0.8rem", cursor: "pointer",
+            borderRadius: 20, border: "1px solid #ccc",
+            background: facultyFilter === null ? "#111" : "#fff",
+            color: facultyFilter === null ? "#fff" : "#555",
+          }}
+        >
+          All
+        </button>
+        {FACULTIES.map((f) => (
+          <button
+            key={f}
+            onClick={() => setFacultyFilter(facultyFilter === f ? null : f)}
+            style={{
+              padding: "0.25rem 0.75rem", fontSize: "0.8rem", cursor: "pointer",
+              borderRadius: 20, border: "1px solid #ccc",
+              background: facultyFilter === f ? "#111" : "#fff",
+              color: facultyFilter === f ? "#fff" : "#555",
+            }}
+          >
+            {f}
+          </button>
+        ))}
+      </div>
 
       {/* List */}
       {loading && <p style={{ color: "#888" }}>Loading…</p>}
       {!loading && posts.length === 0 && (
-        <p style={{ color: "#888" }}>No questions yet. Ask one!</p>
+        <p style={{ color: "#888" }}>
+          {facultyFilter ? `No questions tagged ${facultyFilter} yet.` : "No questions yet. Ask one!"}
+        </p>
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
@@ -147,8 +207,9 @@ export default function QAPage() {
             key={post.id}
             style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: "1rem", background: "#fff" }}
           >
-            <div style={{ fontSize: "0.82rem", color: "#999", marginBottom: "0.5rem" }}>
-              Anonymous · {timeAgo(post.created_at)}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.82rem", color: "#999", marginBottom: "0.5rem" }}>
+              <span>Anonymous · {timeAgo(post.created_at)}</span>
+              {post.faculty_tag && <FacultyBadge tag={post.faculty_tag} />}
             </div>
             <p style={{ margin: "0 0 0.75rem", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
               {post.content}

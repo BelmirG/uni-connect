@@ -20,6 +20,8 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(nullable=False)
     bio: Mapped[str | None] = mapped_column(nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(nullable=True)
+    faculty: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    program: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     is_email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     email_verification_token: Mapped[str | None] = mapped_column(nullable=True)

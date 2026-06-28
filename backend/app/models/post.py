@@ -25,6 +25,7 @@ class Post(Base):
     parent_post_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("posts.id", ondelete="CASCADE"), nullable=True
     )
+    faculty_tag: Mapped[str | None] = mapped_column(String(10), nullable=True)
     is_anonymous: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

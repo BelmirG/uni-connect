@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import UserSearchInput from "@/components/UserSearchInput";
+import { FACULTIES, FACULTY_NAMES, Faculty } from "@/lib/faculties";
 
 interface Author {
   username: string;
@@ -14,6 +15,7 @@ interface Author {
 interface Post {
   id: string;
   content: string;
+  faculty_tag: string | null;
   author: Author | null;
   upvotes: number;
   downvotes: number;
@@ -42,22 +44,37 @@ function timeAgo(iso: string): string {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+function FacultyBadge({ tag }: { tag: string }) {
+  return (
+    <span style={{
+      fontSize: "0.72rem", fontWeight: "bold", letterSpacing: "0.03em",
+      padding: "0.15rem 0.5rem", borderRadius: 12,
+      background: "#f0f0f0", color: "#444", flexShrink: 0,
+    }}>
+      {tag}
+    </span>
+  );
+}
+
 export default function FeedPage() {
   const router = useRouter();
   const [posts, setPosts] = useState<Post[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<"hot" | "new">("hot");
+  const [facultyFilter, setFacultyFilter] = useState<Faculty | null>(null);
   const [currentUsername, setCurrentUsername] = useState<string | null>(null);
   const [content, setContent] = useState("");
+  const [postFacultyTag, setPostFacultyTag] = useState<Faculty | "">("");
   const [submitting, setSubmitting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     setLoading(true);
+    const facultyParam = facultyFilter ? `&faculty=${facultyFilter}` : "";
     Promise.all([
-      apiFetch<PostListResponse>(`/api/posts?sort=${sort}`),
+      apiFetch<PostListResponse>(`/api/posts?sort=${sort}${facultyParam}`),
       apiFetch<{ username: string }>("/api/auth/me"),
     ])
       .then(([postsData, me]) => {
@@ -67,7 +84,7 @@ export default function FeedPage() {
       })
       .catch(() => router.replace("/login"))
       .finally(() => setLoading(false));
-  }, [sort, router]);
+  }, [sort, facultyFilter, router]);
 
   async function handlePost(e: React.FormEvent) {
     e.preventDefault();
@@ -77,11 +94,15 @@ export default function FeedPage() {
     try {
       const newPost = await apiFetch<Post>("/api/posts", {
         method: "POST",
-        body: JSON.stringify({ content: content.trim() }),
+        body: JSON.stringify({
+          content: content.trim(),
+          faculty_tag: postFacultyTag || null,
+        }),
       });
       setPosts((prev) => [newPost, ...prev]);
       setTotal((t) => t + 1);
       setContent("");
+      setPostFacultyTag("");
     } catch (err: unknown) {
       setPostError(err instanceof Error ? err.message : "Failed to post.");
     } finally {
@@ -130,6 +151,7 @@ export default function FeedPage() {
     <main style={{ maxWidth: 640, margin: "0 auto", padding: "1.5rem 1rem" }}>
       <h1 style={{ margin: "0 0 1.5rem" }}>Feed</h1>
 
+      {/* Compose */}
       <form onSubmit={handlePost} style={{ marginBottom: "2rem" }}>
         <textarea
           ref={textareaRef}
@@ -139,30 +161,43 @@ export default function FeedPage() {
           rows={3}
           style={inputStyle}
         />
-        {postError && (
-          <p style={{ color: "crimson", margin: "0.25rem 0", fontSize: "0.9rem" }}>{postError}</p>
-        )}
-        <button
-          type="submit"
-          disabled={submitting || !content.trim()}
-          style={{ marginTop: "0.5rem", padding: "0.5rem 1.2rem", cursor: "pointer" }}
-        >
-          {submitting ? "Posting…" : "Post"}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
+          <select
+            value={postFacultyTag}
+            onChange={(e) => setPostFacultyTag(e.target.value as Faculty | "")}
+            style={{
+              padding: "0.4rem 0.6rem", fontSize: "0.88rem", border: "1px solid #ccc",
+              borderRadius: 4, fontFamily: "inherit", color: postFacultyTag ? "#111" : "#888",
+              background: "#fff",
+            }}
+          >
+            <option value="">Tag faculty (optional)</option>
+            {FACULTIES.map((f) => (
+              <option key={f} value={f}>{f} — {FACULTY_NAMES[f]}</option>
+            ))}
+          </select>
+          {postError && (
+            <p style={{ color: "crimson", margin: 0, fontSize: "0.9rem" }}>{postError}</p>
+          )}
+          <button
+            type="submit"
+            disabled={submitting || !content.trim()}
+            style={{ marginLeft: "auto", padding: "0.5rem 1.2rem", cursor: "pointer" }}
+          >
+            {submitting ? "Posting…" : "Post"}
+          </button>
+        </div>
       </form>
 
-      {/* Sort toggle */}
-      <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
+      {/* Sort + faculty filter */}
+      <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem", flexWrap: "wrap" }}>
         {(["hot", "new"] as const).map((s) => (
           <button
             key={s}
             onClick={() => setSort(s)}
             style={{
-              padding: "0.35rem 0.9rem",
-              fontSize: "0.9rem",
-              cursor: "pointer",
-              borderRadius: 20,
-              border: "1px solid #ccc",
+              padding: "0.35rem 0.9rem", fontSize: "0.9rem", cursor: "pointer",
+              borderRadius: 20, border: "1px solid #ccc",
               background: sort === s ? "#111" : "#fff",
               color: sort === s ? "#fff" : "#555",
               fontWeight: sort === s ? "bold" : "normal",
@@ -173,8 +208,41 @@ export default function FeedPage() {
         ))}
       </div>
 
+      {/* Faculty filter pills */}
+      <div style={{ display: "flex", gap: "0.4rem", marginBottom: "1.25rem", flexWrap: "wrap" }}>
+        <button
+          onClick={() => setFacultyFilter(null)}
+          style={{
+            padding: "0.25rem 0.75rem", fontSize: "0.8rem", cursor: "pointer",
+            borderRadius: 20, border: "1px solid #ccc",
+            background: facultyFilter === null ? "#111" : "#fff",
+            color: facultyFilter === null ? "#fff" : "#555",
+          }}
+        >
+          All
+        </button>
+        {FACULTIES.map((f) => (
+          <button
+            key={f}
+            onClick={() => setFacultyFilter(facultyFilter === f ? null : f)}
+            style={{
+              padding: "0.25rem 0.75rem", fontSize: "0.8rem", cursor: "pointer",
+              borderRadius: 20, border: "1px solid #ccc",
+              background: facultyFilter === f ? "#111" : "#fff",
+              color: facultyFilter === f ? "#fff" : "#555",
+            }}
+          >
+            {f}
+          </button>
+        ))}
+      </div>
+
       {loading && <p style={{ color: "#888" }}>Loading…</p>}
-      {!loading && posts.length === 0 && <p style={{ color: "#888" }}>No posts yet. Be the first!</p>}
+      {!loading && posts.length === 0 && (
+        <p style={{ color: "#888" }}>
+          {facultyFilter ? `No posts tagged ${facultyFilter} yet.` : "No posts yet. Be the first!"}
+        </p>
+      )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
         {posts.map((post) => (
@@ -286,9 +354,12 @@ function PostCard({
 
   return (
     <div style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: "1rem", background: "#fff" }}>
-      <div style={{ fontSize: "0.85rem", color: "#666", marginBottom: "0.5rem" }}>
-        <strong style={{ color: "#222" }}>{post.author?.display_name ?? "Unknown"}</strong>{" "}
-        @{post.author?.username ?? "?"} · {timeAgo(post.created_at)}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.85rem", color: "#666", marginBottom: "0.5rem" }}>
+        <span>
+          <strong style={{ color: "#222" }}>{post.author?.display_name ?? "Unknown"}</strong>{" "}
+          @{post.author?.username ?? "?"} · {timeAgo(post.created_at)}
+        </span>
+        {post.faculty_tag && <FacultyBadge tag={post.faculty_tag} />}
       </div>
       <p style={{ margin: "0 0 0.75rem", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
         {post.content}

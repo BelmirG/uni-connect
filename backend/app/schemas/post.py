@@ -1,12 +1,15 @@
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
+
+FacultyTag = Optional[Literal['FMS', 'FENS', 'FASS', 'FBA', 'FLW', 'FEDU']]
 
 
 class CreatePostRequest(BaseModel):
     content: str = Field(min_length=1, max_length=10_000)
+    faculty_tag: FacultyTag = None
 
 
 class VoteRequest(BaseModel):
@@ -22,6 +25,7 @@ class PostResponse(BaseModel):
     id: uuid.UUID
     content: str
     post_type: str
+    faculty_tag: Optional[str] = None
     author: Optional[AuthorInfo]
     upvotes: int
     downvotes: int
