@@ -14,6 +14,16 @@ type FeedTab = "discover" | "friends";
 interface Author {
   username: string;
   display_name: string;
+  avatar_url: string | null;
+}
+
+function MiniAvatar({ name, url }: { name: string; url: string | null }) {
+  if (url) return <img src={url} alt="" style={{ width: 32, height: 32, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />;
+  return (
+    <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#111", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.8rem", fontWeight: "bold", flexShrink: 0 }}>
+      {(name || "?")[0].toUpperCase()}
+    </div>
+  );
 }
 
 interface Post {
@@ -177,7 +187,7 @@ export default function FeedPage() {
   const [uploaderKey, setUploaderKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [composerOpen, setComposerOpen] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -219,6 +229,7 @@ export default function FeedPage() {
       setPostFacultyTag("");
       setImageUrls([]);
       setUploaderKey((k) => k + 1);
+      setComposerOpen(false);
     } catch (err: unknown) {
       setPostError(err instanceof Error ? err.message : "Failed to post.");
     } finally {
@@ -265,41 +276,8 @@ export default function FeedPage() {
   });
 
   return (
-    <main style={{ maxWidth: 640, margin: "0 auto", padding: "1.5rem 1rem" }}>
-
-      {/* Compose */}
-      <form onSubmit={handlePost} style={{ marginBottom: "1.75rem" }}>
-        <textarea
-          ref={textareaRef}
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="What's on your mind?"
-          rows={3}
-          style={{ width: "100%", boxSizing: "border-box", padding: "0.6rem", fontSize: "0.95rem", border: "1px solid #ccc", borderRadius: 4, fontFamily: "inherit", resize: "vertical" }}
-        />
-        <ImageUploader
-          key={uploaderKey}
-          onUrlsChange={(urls, uploading) => { setImageUrls(urls); setImagesUploading(uploading); }}
-        />
-        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
-          <select
-            value={postFacultyTag}
-            onChange={(e) => setPostFacultyTag(e.target.value as Faculty | "")}
-            style={{ padding: "0.4rem 0.6rem", fontSize: "0.88rem", border: "1px solid #ccc", borderRadius: 4, fontFamily: "inherit", color: postFacultyTag ? "#111" : "#888", background: "#fff" }}
-          >
-            <option value="">Tag faculty (optional)</option>
-            {FACULTIES.map((f) => <option key={f} value={f}>{f} — {FACULTY_NAMES[f]}</option>)}
-          </select>
-          {postError && <p style={{ color: "crimson", margin: 0, fontSize: "0.9rem" }}>{postError}</p>}
-          <button
-            type="submit"
-            disabled={submitting || imagesUploading || (!content.trim() && !imageUrls.length)}
-            style={{ marginLeft: "auto", padding: "0.5rem 1.2rem", cursor: "pointer" }}
-          >
-            {imagesUploading ? "Uploading…" : submitting ? "Posting…" : "Post"}
-          </button>
-        </div>
-      </form>
+    <>
+      <main style={{ maxWidth: 640, margin: "0 auto", padding: "1.5rem 1rem 5rem" }}>
 
       {/* Discover / Friends tabs */}
       <div style={{ display: "flex", borderBottom: "1px solid #e0e0e0", marginBottom: "1rem" }}>
@@ -363,7 +341,65 @@ export default function FeedPage() {
           Showing {posts.length} of {total} posts
         </p>
       )}
-    </main>
+      </main>
+
+      {/* Fixed compose bar — above bottom nav */}
+      <div style={{ position: "fixed", bottom: 60, left: 0, right: 0, background: "#fff", borderTop: "1px solid #e8e8e8", padding: "0.5rem 1rem", zIndex: 50 }}>
+        <div
+          onClick={() => setComposerOpen(true)}
+          style={{ maxWidth: 640, margin: "0 auto", display: "flex", alignItems: "center", padding: "0.6rem 1rem", borderRadius: 20, background: "#f5f5f5", cursor: "text", color: "#aaa", fontSize: "0.95rem" }}
+        >
+          What&apos;s on your mind?
+        </div>
+      </div>
+
+      {/* Compose sheet */}
+      {composerOpen && (
+        <>
+          <div onClick={() => setComposerOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 100 }} />
+          <div style={{ position: "fixed", bottom: 60, left: 0, right: 0, background: "#fff", borderRadius: "16px 16px 0 0", padding: "1rem 1rem 1.5rem", zIndex: 101, maxHeight: "80vh", overflowY: "auto", boxShadow: "0 -4px 24px rgba(0,0,0,0.12)" }}>
+            <div style={{ maxWidth: 640, margin: "0 auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                <span style={{ fontWeight: "600", fontSize: "1rem" }}>Create post</span>
+                <button onClick={() => setComposerOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "1.5rem", color: "#999", lineHeight: 1, padding: "0 0.2rem" }}>×</button>
+              </div>
+              <form onSubmit={handlePost}>
+                <textarea
+                  autoFocus
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  placeholder="What's on your mind?"
+                  rows={4}
+                  style={{ width: "100%", boxSizing: "border-box", padding: "0.6rem", fontSize: "0.95rem", border: "1px solid #ccc", borderRadius: 4, fontFamily: "inherit", resize: "vertical" }}
+                />
+                <ImageUploader
+                  key={uploaderKey}
+                  onUrlsChange={(urls, uploading) => { setImageUrls(urls); setImagesUploading(uploading); }}
+                />
+                <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
+                  <select
+                    value={postFacultyTag}
+                    onChange={(e) => setPostFacultyTag(e.target.value as Faculty | "")}
+                    style={{ padding: "0.4rem 0.6rem", fontSize: "0.88rem", border: "1px solid #ccc", borderRadius: 4, fontFamily: "inherit", color: postFacultyTag ? "#111" : "#888", background: "#fff" }}
+                  >
+                    <option value="">Tag faculty (optional)</option>
+                    {FACULTIES.map((f) => <option key={f} value={f}>{f} — {FACULTY_NAMES[f]}</option>)}
+                  </select>
+                  {postError && <p style={{ color: "crimson", margin: 0, fontSize: "0.9rem" }}>{postError}</p>}
+                  <button
+                    type="submit"
+                    disabled={submitting || imagesUploading || (!content.trim() && !imageUrls.length)}
+                    style={{ marginLeft: "auto", padding: "0.5rem 1.2rem", cursor: "pointer" }}
+                  >
+                    {imagesUploading ? "Uploading…" : submitting ? "Posting…" : "Post"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </>
+      )}
+    </>
   );
 }
 
@@ -432,12 +468,17 @@ function PostCard({
 
   return (
     <div style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: "1rem", background: "#fff" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.85rem", color: "#666", marginBottom: "0.5rem" }}>
-        <Link href={`/profile/${post.author?.username}`} style={{ color: "inherit", textDecoration: "none" }}>
-          <strong style={{ color: "#222" }}>{post.author?.display_name ?? "Unknown"}</strong>
-          {" "}<span style={{ color: "#999" }}>@{post.author?.username ?? "?"}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.55rem", marginBottom: "0.6rem" }}>
+        <Link href={`/profile/${post.author?.username}`} style={{ flexShrink: 0 }}>
+          <MiniAvatar name={post.author?.display_name ?? "?"} url={post.author?.avatar_url ?? null} />
         </Link>
-        <span>· {timeAgo(post.created_at)}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Link href={`/profile/${post.author?.username}`} style={{ color: "inherit", textDecoration: "none" }}>
+            <strong style={{ color: "#222", fontSize: "0.9rem" }}>{post.author?.display_name ?? "Unknown"}</strong>
+            {" "}<span style={{ color: "#999", fontSize: "0.82rem" }}>@{post.author?.username ?? "?"}</span>
+          </Link>
+          <span style={{ color: "#bbb", fontSize: "0.8rem" }}> · {timeAgo(post.created_at)}</span>
+        </div>
         {post.faculty_tag && <FacultyBadge tag={post.faculty_tag} />}
       </div>
       <ImageGrid urls={post.image_urls ?? []} />

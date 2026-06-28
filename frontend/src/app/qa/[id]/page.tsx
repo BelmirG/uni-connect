@@ -174,6 +174,7 @@ export default function QADetailPage() {
   const [topUploaderKey, setTopUploaderKey] = useState(0);
   const [topSubmitting, setTopSubmitting] = useState(false);
   const [topError, setTopError] = useState<string | null>(null);
+  const [composerOpen, setComposerOpen] = useState(false);
 
   // Inline reply form
   const [replyingToId, setReplyingToId] = useState<string | null>(null);
@@ -218,6 +219,7 @@ export default function QADetailPage() {
       setTopContent("");
       setTopImageUrls([]);
       setTopUploaderKey((k) => k + 1);
+      setComposerOpen(false);
     } catch (err: unknown) {
       setTopError(err instanceof Error ? err.message : "Failed to post answer.");
     } finally {
@@ -279,7 +281,7 @@ export default function QADetailPage() {
 
   return (
     <Ctx.Provider value={ctxValue}>
-      <main style={{ maxWidth: 640, margin: "0 auto", padding: "1.5rem 1rem" }}>
+      <main style={{ maxWidth: 640, margin: "0 auto", padding: "1.5rem 1rem 5rem" }}>
         <Link href="/qa" style={{ fontSize: "0.9rem" }}>← Back to Q&amp;A</Link>
 
         {/* Question */}
@@ -302,32 +304,6 @@ export default function QADetailPage() {
           </div>
         </div>
 
-        {/* Top-level answer form */}
-        <form onSubmit={handleTopAnswer} style={{ marginBottom: "1.5rem" }}>
-          <textarea
-            value={topContent}
-            onChange={(e) => setTopContent(e.target.value)}
-            placeholder="Write an anonymous answer…"
-            rows={3}
-            style={{ width: "100%", boxSizing: "border-box", padding: "0.6rem", fontSize: "0.95rem", border: "1px solid #ccc", borderRadius: 4, fontFamily: "inherit", resize: "vertical" }}
-          />
-          <ImageUploader
-            key={topUploaderKey}
-            onUrlsChange={(urls, uploading) => { setTopImageUrls(urls); setTopImagesUploading(uploading); }}
-          />
-          <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginTop: "0.5rem" }}>
-            <button
-              type="submit"
-              disabled={topSubmitting || topImagesUploading || (!topContent.trim() && !topImageUrls.length)}
-              style={{ padding: "0.5rem 1.2rem", cursor: "pointer" }}
-            >
-              {topImagesUploading ? "Uploading…" : topSubmitting ? "Posting…" : "Answer anonymously"}
-            </button>
-            <span style={{ fontSize: "0.82rem", color: "#999" }}>🔒 Your name will not be shown</span>
-          </div>
-          {topError && <p style={{ color: "crimson", margin: "0.4rem 0 0", fontSize: "0.9rem" }}>{topError}</p>}
-        </form>
-
         {/* Answer count + thread */}
         <div style={{ borderTop: "1px solid #eee", paddingTop: "0.75rem" }}>
           <h3 style={{ color: "#444", marginTop: 0, marginBottom: "1rem" }}>
@@ -338,6 +314,55 @@ export default function QADetailPage() {
           ))}
         </div>
       </main>
+
+      {/* Fixed compose bar */}
+      <div style={{ position: "fixed", bottom: 60, left: 0, right: 0, background: "#fff", borderTop: "1px solid #e8e8e8", padding: "0.5rem 1rem", zIndex: 50 }}>
+        <div
+          onClick={() => setComposerOpen(true)}
+          style={{ maxWidth: 640, margin: "0 auto", display: "flex", alignItems: "center", padding: "0.6rem 1rem", borderRadius: 20, background: "#f5f5f5", cursor: "text", color: "#aaa", fontSize: "0.95rem" }}
+        >
+          Write an anonymous answer…
+        </div>
+      </div>
+
+      {composerOpen && (
+        <>
+          <div onClick={() => setComposerOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 100 }} />
+          <div style={{ position: "fixed", bottom: 60, left: 0, right: 0, background: "#fff", borderRadius: "16px 16px 0 0", padding: "1rem 1rem 1.5rem", zIndex: 101, maxHeight: "80vh", overflowY: "auto", boxShadow: "0 -4px 24px rgba(0,0,0,0.12)" }}>
+            <div style={{ maxWidth: 640, margin: "0 auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                <span style={{ fontWeight: "600", fontSize: "1rem" }}>Answer anonymously</span>
+                <button onClick={() => setComposerOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "1.5rem", color: "#999", lineHeight: 1, padding: "0 0.2rem" }}>×</button>
+              </div>
+              <form onSubmit={handleTopAnswer}>
+                <textarea
+                  autoFocus
+                  value={topContent}
+                  onChange={(e) => setTopContent(e.target.value)}
+                  placeholder="Write an anonymous answer…"
+                  rows={4}
+                  style={{ width: "100%", boxSizing: "border-box", padding: "0.6rem", fontSize: "0.95rem", border: "1px solid #ccc", borderRadius: 4, fontFamily: "inherit", resize: "vertical" }}
+                />
+                <ImageUploader
+                  key={topUploaderKey}
+                  onUrlsChange={(urls, uploading) => { setTopImageUrls(urls); setTopImagesUploading(uploading); }}
+                />
+                <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginTop: "0.5rem" }}>
+                  <button
+                    type="submit"
+                    disabled={topSubmitting || topImagesUploading || (!topContent.trim() && !topImageUrls.length)}
+                    style={{ padding: "0.5rem 1.2rem", cursor: "pointer" }}
+                  >
+                    {topImagesUploading ? "Uploading…" : topSubmitting ? "Posting…" : "Answer anonymously"}
+                  </button>
+                  <span style={{ fontSize: "0.82rem", color: "#999" }}>🔒 anonymous</span>
+                </div>
+                {topError && <p style={{ color: "crimson", margin: "0.4rem 0 0", fontSize: "0.9rem" }}>{topError}</p>}
+              </form>
+            </div>
+          </div>
+        </>
+      )}
     </Ctx.Provider>
   );
 }

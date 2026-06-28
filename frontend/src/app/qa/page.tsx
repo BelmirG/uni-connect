@@ -64,6 +64,7 @@ export default function QAPage() {
   const [uploaderKey, setUploaderKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
+  const [composerOpen, setComposerOpen] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -95,6 +96,7 @@ export default function QAPage() {
       setFacultyTag("");
       setImageUrls([]);
       setUploaderKey((k) => k + 1);
+      setComposerOpen(false);
     } catch (err: unknown) {
       setPostError(err instanceof Error ? err.message : "Failed to post.");
     } finally {
@@ -130,7 +132,8 @@ export default function QAPage() {
   };
 
   return (
-    <main style={{ maxWidth: 640, margin: "0 auto", padding: "1.5rem 1rem" }}>
+    <>
+      <main style={{ maxWidth: 640, margin: "0 auto", padding: "1.5rem 1rem 5rem" }}>
       <h1 style={{ margin: "0 0 0.5rem" }}>Anonymous Q&amp;A</h1>
 
       <p style={{ color: "#666", fontSize: "0.9rem", marginTop: 0, marginBottom: "1.5rem" }}>
@@ -138,48 +141,6 @@ export default function QAPage() {
         visible to other students. Administrators can see authorship only for
         moderation purposes.
       </p>
-
-      {/* New question form */}
-      <form onSubmit={handlePost} style={{ marginBottom: "2rem" }}>
-        <textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="Ask a question anonymously…"
-          rows={3}
-          style={textareaStyle}
-        />
-        <ImageUploader
-          key={uploaderKey}
-          onUrlsChange={(urls, uploading) => { setImageUrls(urls); setImagesUploading(uploading); }}
-        />
-        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
-          <select
-            value={facultyTag}
-            onChange={(e) => setFacultyTag(e.target.value as Faculty | "")}
-            style={{
-              padding: "0.4rem 0.6rem", fontSize: "0.88rem", border: "1px solid #ccc",
-              borderRadius: 4, fontFamily: "inherit",
-              color: facultyTag ? "#111" : "#888", background: "#fff",
-            }}
-          >
-            <option value="">Tag faculty (optional)</option>
-            {FACULTIES.map((f) => (
-              <option key={f} value={f}>{f} — {FACULTY_NAMES[f]}</option>
-            ))}
-          </select>
-          <span style={{ fontSize: "0.82rem", color: "#999" }}>🔒 Your name will not be shown</span>
-          <button
-            type="submit"
-            disabled={submitting || imagesUploading || (!content.trim() && !imageUrls.length)}
-            style={{ marginLeft: "auto", padding: "0.5rem 1.2rem", cursor: "pointer" }}
-          >
-            {imagesUploading ? "Uploading…" : submitting ? "Posting…" : "Post anonymously"}
-          </button>
-        </div>
-        {postError && (
-          <p style={{ color: "crimson", margin: "0.4rem 0 0", fontSize: "0.9rem" }}>{postError}</p>
-        )}
-      </form>
 
       {/* Faculty filter pills */}
       <div style={{ display: "flex", gap: "0.4rem", marginBottom: "1.25rem", flexWrap: "wrap" }}>
@@ -268,6 +229,64 @@ export default function QAPage() {
           Showing {posts.length} of {total} questions
         </p>
       )}
-    </main>
+      </main>
+
+      {/* Fixed compose bar */}
+      <div style={{ position: "fixed", bottom: 60, left: 0, right: 0, background: "#fff", borderTop: "1px solid #e8e8e8", padding: "0.5rem 1rem", zIndex: 50 }}>
+        <div
+          onClick={() => setComposerOpen(true)}
+          style={{ maxWidth: 640, margin: "0 auto", display: "flex", alignItems: "center", padding: "0.6rem 1rem", borderRadius: 20, background: "#f5f5f5", cursor: "text", color: "#aaa", fontSize: "0.95rem" }}
+        >
+          Ask a question anonymously…
+        </div>
+      </div>
+
+      {composerOpen && (
+        <>
+          <div onClick={() => setComposerOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 100 }} />
+          <div style={{ position: "fixed", bottom: 60, left: 0, right: 0, background: "#fff", borderRadius: "16px 16px 0 0", padding: "1rem 1rem 1.5rem", zIndex: 101, maxHeight: "80vh", overflowY: "auto", boxShadow: "0 -4px 24px rgba(0,0,0,0.12)" }}>
+            <div style={{ maxWidth: 640, margin: "0 auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                <span style={{ fontWeight: "600", fontSize: "1rem" }}>Ask anonymously</span>
+                <button onClick={() => setComposerOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "1.5rem", color: "#999", lineHeight: 1, padding: "0 0.2rem" }}>×</button>
+              </div>
+              <form onSubmit={handlePost}>
+                <textarea
+                  autoFocus
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  placeholder="Ask a question anonymously…"
+                  rows={4}
+                  style={textareaStyle}
+                />
+                <ImageUploader
+                  key={uploaderKey}
+                  onUrlsChange={(urls, uploading) => { setImageUrls(urls); setImagesUploading(uploading); }}
+                />
+                <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
+                  <select
+                    value={facultyTag}
+                    onChange={(e) => setFacultyTag(e.target.value as Faculty | "")}
+                    style={{ padding: "0.4rem 0.6rem", fontSize: "0.88rem", border: "1px solid #ccc", borderRadius: 4, fontFamily: "inherit", color: facultyTag ? "#111" : "#888", background: "#fff" }}
+                  >
+                    <option value="">Tag faculty (optional)</option>
+                    {FACULTIES.map((f) => <option key={f} value={f}>{f} — {FACULTY_NAMES[f]}</option>)}
+                  </select>
+                  <span style={{ fontSize: "0.82rem", color: "#999" }}>🔒 anonymous</span>
+                  <button
+                    type="submit"
+                    disabled={submitting || imagesUploading || (!content.trim() && !imageUrls.length)}
+                    style={{ marginLeft: "auto", padding: "0.5rem 1.2rem", cursor: "pointer" }}
+                  >
+                    {imagesUploading ? "Uploading…" : submitting ? "Posting…" : "Post anonymously"}
+                  </button>
+                </div>
+                {postError && <p style={{ color: "crimson", margin: "0.4rem 0 0", fontSize: "0.9rem" }}>{postError}</p>}
+              </form>
+            </div>
+          </div>
+        </>
+      )}
+    </>
   );
 }

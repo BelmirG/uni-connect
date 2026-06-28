@@ -28,6 +28,16 @@ interface JoinRequest {
 interface Author {
   username: string;
   display_name: string;
+  avatar_url: string | null;
+}
+
+function MiniAvatar({ name, url }: { name: string; url: string | null }) {
+  if (url) return <img src={url} alt="" style={{ width: 30, height: 30, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />;
+  return (
+    <div style={{ width: 30, height: 30, borderRadius: "50%", background: "#111", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.75rem", fontWeight: "bold", flexShrink: 0 }}>
+      {(name || "?")[0].toUpperCase()}
+    </div>
+  );
 }
 
 interface Post {
@@ -90,6 +100,7 @@ export default function ClubDetailPage() {
   const [uploaderKey, setUploaderKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
+  const [composerOpen, setComposerOpen] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -218,6 +229,7 @@ export default function ClubDetailPage() {
       setContent("");
       setImageUrls([]);
       setUploaderKey((k) => k + 1);
+      setComposerOpen(false);
     } catch (err: unknown) {
       setPostError(err instanceof Error ? err.message : "Failed to post.");
     } finally {
@@ -269,7 +281,8 @@ export default function ClubDetailPage() {
   const roleColor: Record<string, string> = { owner: "#7b2d8b", moderator: "#1a6b3a", member: "#555" };
 
   return (
-    <main style={{ maxWidth: 640, margin: "0 auto", padding: "1.5rem 1rem" }}>
+    <>
+    <main style={{ maxWidth: 640, margin: "0 auto", padding: "1.5rem 1rem 5rem" }}>
       {/* Back link + chat shortcut */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <Link href="/clubs" style={{ fontSize: "0.9rem" }}>← Clubs</Link>
@@ -412,36 +425,7 @@ export default function ClubDetailPage() {
         )}
       </div>
 
-      {/* Create post (members only) */}
-      {club.is_member ? (
-        <form onSubmit={handlePost} style={{ marginBottom: "1.5rem" }}>
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder={`Post in ${club.name}…`}
-            rows={3}
-            style={{
-              width: "100%", boxSizing: "border-box", padding: "0.6rem",
-              fontSize: "0.95rem", border: "1px solid #ccc", borderRadius: 4,
-              fontFamily: "inherit", resize: "vertical",
-            }}
-          />
-          <ImageUploader
-            key={uploaderKey}
-            onUrlsChange={(urls, uploading) => { setImageUrls(urls); setImagesUploading(uploading); }}
-          />
-          <button
-            type="submit"
-            disabled={submitting || imagesUploading || (!content.trim() && !imageUrls.length)}
-            style={{ marginTop: "0.5rem", padding: "0.5rem 1.2rem", cursor: "pointer" }}
-          >
-            {imagesUploading ? "Uploading…" : submitting ? "Posting…" : "Post"}
-          </button>
-          {postError && (
-            <p style={{ color: "crimson", margin: "0.4rem 0 0", fontSize: "0.9rem" }}>{postError}</p>
-          )}
-        </form>
-      ) : (
+      {!club.is_member && (
         <p style={{ color: "#888", fontSize: "0.9rem", marginBottom: "1.5rem" }}>
           Join this club to post here.
         </p>
@@ -456,11 +440,14 @@ export default function ClubDetailPage() {
             key={post.id}
             style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: "1rem", background: "#fff" }}
           >
-            <div style={{ fontSize: "0.82rem", color: "#999", marginBottom: "0.4rem" }}>
-              {post.author
-                ? <><strong style={{ color: "#444" }}>{post.author.display_name}</strong> @{post.author.username}</>
-                : <em>Unknown</em>}
-              {" · "}{timeAgo(post.created_at)}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
+              <MiniAvatar name={post.author?.display_name ?? "?"} url={post.author?.avatar_url ?? null} />
+              <div style={{ fontSize: "0.82rem", color: "#888" }}>
+                {post.author
+                  ? <><strong style={{ color: "#444" }}>{post.author.display_name}</strong> @{post.author.username}</>
+                  : <em>Unknown</em>}
+                {" · "}{timeAgo(post.created_at)}
+              </div>
             </div>
             <ImageGrid urls={post.image_urls ?? []} />
             {post.content && (
@@ -512,5 +499,58 @@ export default function ClubDetailPage() {
         </p>
       )}
     </main>
+
+    {club.is_member && (
+      <>
+        {/* Fixed compose bar */}
+        <div style={{ position: "fixed", bottom: 60, left: 0, right: 0, background: "#fff", borderTop: "1px solid #e8e8e8", padding: "0.5rem 1rem", zIndex: 50 }}>
+          <div
+            onClick={() => setComposerOpen(true)}
+            style={{ maxWidth: 640, margin: "0 auto", display: "flex", alignItems: "center", padding: "0.6rem 1rem", borderRadius: 20, background: "#f5f5f5", cursor: "text", color: "#aaa", fontSize: "0.95rem" }}
+          >
+            Post in {club.name}…
+          </div>
+        </div>
+
+        {composerOpen && (
+          <>
+            <div onClick={() => setComposerOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 100 }} />
+            <div style={{ position: "fixed", bottom: 60, left: 0, right: 0, background: "#fff", borderRadius: "16px 16px 0 0", padding: "1rem 1rem 1.5rem", zIndex: 101, maxHeight: "80vh", overflowY: "auto", boxShadow: "0 -4px 24px rgba(0,0,0,0.12)" }}>
+              <div style={{ maxWidth: 640, margin: "0 auto" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                  <span style={{ fontWeight: "600", fontSize: "1rem" }}>Post in {club.name}</span>
+                  <button onClick={() => setComposerOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "1.5rem", color: "#999", lineHeight: 1, padding: "0 0.2rem" }}>×</button>
+                </div>
+                <form onSubmit={handlePost}>
+                  <textarea
+                    autoFocus
+                    value={content}
+                    onChange={(e) => setContent(e.target.value)}
+                    placeholder={`Post in ${club.name}…`}
+                    rows={4}
+                    style={{ width: "100%", boxSizing: "border-box", padding: "0.6rem", fontSize: "0.95rem", border: "1px solid #ccc", borderRadius: 4, fontFamily: "inherit", resize: "vertical" }}
+                  />
+                  <ImageUploader
+                    key={uploaderKey}
+                    onUrlsChange={(urls, uploading) => { setImageUrls(urls); setImagesUploading(uploading); }}
+                  />
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.5rem" }}>
+                    {postError && <p style={{ color: "crimson", margin: 0, fontSize: "0.9rem" }}>{postError}</p>}
+                    <button
+                      type="submit"
+                      disabled={submitting || imagesUploading || (!content.trim() && !imageUrls.length)}
+                      style={{ marginLeft: "auto", padding: "0.5rem 1.2rem", cursor: "pointer" }}
+                    >
+                      {imagesUploading ? "Uploading…" : submitting ? "Posting…" : "Post"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </>
+        )}
+      </>
+    )}
+    </>
   );
 }

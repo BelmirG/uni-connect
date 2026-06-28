@@ -26,6 +26,7 @@ class VoteRequest(BaseModel):
 class AuthorInfo(BaseModel):
     username: str
     display_name: str
+    avatar_url: Optional[str] = None
 
 
 class PostResponse(BaseModel):

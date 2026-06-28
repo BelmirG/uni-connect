@@ -47,7 +47,7 @@ def _build_post_select(extra_where=None, hot_score: bool = False):
         .scalar_subquery()
         .label("share_count")
     )
-    columns = [Post, User.username, User.display_name, upvotes_col, downvotes_col, reply_count_col, share_count_col]
+    columns = [Post, User.username, User.display_name, User.avatar_url, upvotes_col, downvotes_col, reply_count_col, share_count_col]
 
     if hot_score:
         age_hours = func.extract("epoch", func.now() - Post.created_at) / 3600.0
@@ -66,7 +66,7 @@ def _build_post_select(extra_where=None, hot_score: bool = False):
             ReplyAlias,
             and_(ReplyAlias.parent_post_id == Post.id, ReplyAlias.is_deleted == False),
         )
-        .group_by(Post.id, User.username, User.display_name)
+        .group_by(Post.id, User.username, User.display_name, User.avatar_url)
     )
     if extra_where is not None:
         stmt = stmt.where(extra_where)
@@ -88,14 +88,14 @@ async def _user_votes(
 
 
 def _row_to_response(row, current_vote: str | None) -> PostResponse:
-    post, username, display_name, upvotes, downvotes, reply_count, share_count, *_ = row
+    post, username, display_name, avatar_url, upvotes, downvotes, reply_count, share_count, *_ = row
     return PostResponse(
         id=post.id,
         content="[deleted]" if post.is_deleted else post.content,
         post_type=post.post_type,
         faculty_tag=post.faculty_tag,
         image_urls=post.image_urls or [],
-        author=AuthorInfo(username=username, display_name=display_name) if username else None,
+        author=AuthorInfo(username=username, display_name=display_name, avatar_url=avatar_url) if username else None,
         upvotes=upvotes or 0,
         downvotes=downvotes or 0,
         current_user_vote=current_vote,
