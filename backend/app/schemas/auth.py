@@ -28,6 +28,9 @@ class UserResponse(BaseModel):
     email: str
     username: str
     display_name: str
+    bio: str | None = None
+    faculty: str | None = None
+    program: str | None = None
     is_email_verified: bool
     is_admin: bool
     created_at: datetime

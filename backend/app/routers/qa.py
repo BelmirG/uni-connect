@@ -50,6 +50,7 @@ def _row_to_response(row, current_vote: str | None) -> QAPostResponse:
     return QAPostResponse(
         id=post.id,
         content="[deleted]" if post.is_deleted else post.content,
+        faculty_tag=post.faculty_tag,
         upvotes=upvotes or 0,
         downvotes=downvotes or 0,
         current_user_vote=current_vote,
@@ -118,6 +119,7 @@ async def create_question(
         content=body.content,
         post_type="anonymous_qa",
         is_anonymous=True,
+        faculty_tag=body.faculty_tag,
     )
     db.add(post)
     await db.flush()  # generate post.id before committing
@@ -130,6 +132,7 @@ async def create_question(
     return QAPostResponse(
         id=post.id,
         content=post.content,
+        faculty_tag=post.faculty_tag,
         upvotes=0,
         downvotes=0,
         current_user_vote=None,
@@ -144,13 +147,19 @@ async def create_question(
 async def list_questions(
     limit: int = 20,
     offset: int = 0,
+    faculty: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    from app.core.constants import FACULTIES
+    if faculty and faculty not in FACULTIES:
+        raise HTTPException(status_code=422, detail="Invalid faculty tag.")
+
     where = and_(
         Post.post_type == "anonymous_qa",
         Post.parent_post_id.is_(None),
         Post.is_deleted == False,
+        *([ Post.faculty_tag == faculty ] if faculty else []),
     )
     rows = (
         await db.execute(

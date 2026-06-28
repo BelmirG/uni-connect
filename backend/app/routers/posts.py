@@ -92,6 +92,7 @@ def _row_to_response(row, current_vote: str | None) -> PostResponse:
         id=post.id,
         content="[deleted]" if post.is_deleted else post.content,
         post_type=post.post_type,
+        faculty_tag=post.faculty_tag,
         author=AuthorInfo(username=username, display_name=display_name) if username else None,
         upvotes=upvotes or 0,
         downvotes=downvotes or 0,
@@ -137,7 +138,12 @@ async def create_post(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    post = Post(author_id=current_user.id, content=body.content, post_type="feed")
+    post = Post(
+        author_id=current_user.id,
+        content=body.content,
+        post_type="feed",
+        faculty_tag=body.faculty_tag,
+    )
     db.add(post)
     await db.commit()
     await db.refresh(post)
@@ -146,6 +152,7 @@ async def create_post(
         id=post.id,
         content=post.content,
         post_type="feed",
+        faculty_tag=post.faculty_tag,
         author=AuthorInfo(
             username=current_user.username, display_name=current_user.display_name
         ),
@@ -164,13 +171,19 @@ async def list_posts(
     limit: int = 20,
     offset: int = 0,
     sort: str = "hot",
+    faculty: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    from app.core.constants import FACULTIES
+    if faculty and faculty not in FACULTIES:
+        raise HTTPException(status_code=422, detail="Invalid faculty tag.")
+
     where = and_(
         Post.post_type == "feed",
         Post.parent_post_id.is_(None),
         Post.is_deleted == False,
+        *([ Post.faculty_tag == faculty ] if faculty else []),
     )
 
     include_hot = sort == "hot"

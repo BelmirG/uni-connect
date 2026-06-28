@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { FACULTY_NAMES, Faculty } from "@/lib/faculties";
 
 interface QAPost {
   id: string;
   content: string;
+  faculty_tag: string | null;
   upvotes: number;
   downvotes: number;
   current_user_vote: "up" | "down" | null;
@@ -108,8 +110,13 @@ export default function QADetailPage() {
 
       {/* Question */}
       <div style={{ ...cardStyle, margin: "1rem 0 1.5rem" }}>
-        <div style={{ fontSize: "0.82rem", color: "#999", marginBottom: "0.5rem" }}>
-          Anonymous · {timeAgo(question.created_at)}
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.82rem", color: "#999", marginBottom: "0.5rem" }}>
+          <span>Anonymous · {timeAgo(question.created_at)}</span>
+          {question.faculty_tag && (
+            <span style={{ fontSize: "0.72rem", fontWeight: "bold", padding: "0.15rem 0.5rem", borderRadius: 12, background: "#f0f0f0", color: "#444" }}>
+              {question.faculty_tag}
+            </span>
+          )}
         </div>
         <p style={{ margin: "0 0 0.75rem", whiteSpace: "pre-wrap", lineHeight: 1.5, fontSize: "1.05rem" }}>
           {question.content}
