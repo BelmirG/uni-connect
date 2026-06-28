@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import { apiFetch, ApiError } from "@/lib/api";
+import { ImageUploader } from "@/components/ImageUploader";
+import { ImageGrid } from "@/components/ImageGrid";
 
 interface Club {
   id: string;
@@ -31,6 +33,7 @@ interface Author {
 interface Post {
   id: string;
   content: string;
+  image_urls: string[];
   author: Author | null;
   upvotes: number;
   downvotes: number;
@@ -82,6 +85,9 @@ export default function ClubDetailPage() {
 
   const [currentUsername, setCurrentUsername] = useState<string | null>(null);
   const [content, setContent] = useState("");
+  const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [imagesUploading, setImagesUploading] = useState(false);
+  const [uploaderKey, setUploaderKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
 
@@ -198,17 +204,20 @@ export default function ClubDetailPage() {
 
   async function handlePost(e: React.FormEvent) {
     e.preventDefault();
-    if (!content.trim()) return;
+    if (!content.trim() && !imageUrls.length) return;
+    if (imagesUploading) return;
     setSubmitting(true);
     setPostError(null);
     try {
       const newPost = await apiFetch<Post>(`/api/clubs/${slug}/posts`, {
         method: "POST",
-        body: JSON.stringify({ content: content.trim() }),
+        body: JSON.stringify({ content: content.trim(), image_urls: imageUrls }),
       });
       setPosts((prev) => [newPost, ...prev]);
       setTotal((t) => t + 1);
       setContent("");
+      setImageUrls([]);
+      setUploaderKey((k) => k + 1);
     } catch (err: unknown) {
       setPostError(err instanceof Error ? err.message : "Failed to post.");
     } finally {
@@ -417,12 +426,16 @@ export default function ClubDetailPage() {
               fontFamily: "inherit", resize: "vertical",
             }}
           />
+          <ImageUploader
+            key={uploaderKey}
+            onUrlsChange={(urls, uploading) => { setImageUrls(urls); setImagesUploading(uploading); }}
+          />
           <button
             type="submit"
-            disabled={submitting || !content.trim()}
+            disabled={submitting || imagesUploading || (!content.trim() && !imageUrls.length)}
             style={{ marginTop: "0.5rem", padding: "0.5rem 1.2rem", cursor: "pointer" }}
           >
-            {submitting ? "Posting…" : "Post"}
+            {imagesUploading ? "Uploading…" : submitting ? "Posting…" : "Post"}
           </button>
           {postError && (
             <p style={{ color: "crimson", margin: "0.4rem 0 0", fontSize: "0.9rem" }}>{postError}</p>
@@ -449,9 +462,12 @@ export default function ClubDetailPage() {
                 : <em>Unknown</em>}
               {" · "}{timeAgo(post.created_at)}
             </div>
-            <p style={{ margin: "0 0 0.75rem", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
-              {post.content}
-            </p>
+            <ImageGrid urls={post.image_urls ?? []} />
+            {post.content && (
+              <p style={{ margin: "0 0 0.75rem", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+                {post.content}
+              </p>
+            )}
             <div style={{ display: "flex", gap: "1rem", alignItems: "center", fontSize: "0.9rem" }}>
               <button
                 onClick={() => handleVote(post.id, "up")}

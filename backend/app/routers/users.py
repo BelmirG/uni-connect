@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import or_
+
 from app.core.constants import FACULTIES
 from app.database import get_db
 from app.dependencies import get_current_user
@@ -51,6 +53,58 @@ async def _follow_counts(user_id: uuid.UUID, db: AsyncSession) -> tuple[int, int
 
 
 # ── literal paths before /{username} ──────────────────────────────────────────
+
+@router.get("/search")
+async def search_users(
+    q: str = "",
+    limit: int = 10,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Search users by username or display name. Returns up to `limit` results
+    with an `is_following` flag so the frontend can show the right button."""
+    q = q.strip()
+    if not q:
+        return []
+
+    pattern = f"%{q}%"
+    users = (await db.execute(
+        select(User)
+        .where(
+            User.is_active == True,
+            User.is_email_verified == True,
+            User.id != current_user.id,
+            or_(User.username.ilike(pattern), User.display_name.ilike(pattern)),
+        )
+        .order_by(User.display_name)
+        .limit(limit)
+    )).scalars().all()
+
+    if not users:
+        return []
+
+    # Batch-check which of these users the current user already follows
+    user_ids = [u.id for u in users]
+    following_ids = set(
+        row[0] for row in (await db.execute(
+            select(Follow.following_id).where(
+                Follow.follower_id == current_user.id,
+                Follow.following_id.in_(user_ids),
+            )
+        )).all()
+    )
+
+    return [
+        {
+            "username": u.username,
+            "display_name": u.display_name,
+            "faculty": u.faculty,
+            "program": u.program,
+            "is_following": u.id in following_ids,
+        }
+        for u in users
+    ]
+
 
 @router.put("/me")
 async def update_profile(

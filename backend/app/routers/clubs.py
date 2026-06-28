@@ -91,6 +91,7 @@ def _row_to_post(row, current_vote: str | None) -> PostResponse:
         id=post.id,
         content="[deleted]" if post.is_deleted else post.content,
         post_type=post.post_type,
+        image_urls=post.image_urls or [],
         author=AuthorInfo(username=username, display_name=display_name) if username else None,
         upvotes=upvotes or 0,
         downvotes=downvotes or 0,
@@ -374,6 +375,7 @@ async def create_club_post(
         content=body.content,
         post_type="club",
         club_id=club.id,
+        image_urls=body.image_urls,
     )
     db.add(post)
     await db.commit()
@@ -383,6 +385,7 @@ async def create_club_post(
         id=post.id,
         content=post.content,
         post_type="club",
+        image_urls=post.image_urls or [],
         author=AuthorInfo(
             username=current_user.username, display_name=current_user.display_name
         ),

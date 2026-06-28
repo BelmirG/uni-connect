@@ -35,6 +35,7 @@ services:
       SECRET_KEY: dev-secret-key-change-before-production
     volumes:
       - ./backend:/app
+      - ./uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy

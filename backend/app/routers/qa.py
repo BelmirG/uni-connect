@@ -51,6 +51,7 @@ def _row_to_response(row, current_vote: str | None) -> QAPostResponse:
         id=post.id,
         content="[deleted]" if post.is_deleted else post.content,
         faculty_tag=post.faculty_tag,
+        image_urls=post.image_urls or [],
         upvotes=upvotes or 0,
         downvotes=downvotes or 0,
         current_user_vote=current_vote,
@@ -120,6 +121,7 @@ async def create_question(
         post_type="anonymous_qa",
         is_anonymous=True,
         faculty_tag=body.faculty_tag,
+        image_urls=body.image_urls,
     )
     db.add(post)
     await db.flush()  # generate post.id before committing
@@ -133,6 +135,7 @@ async def create_question(
         id=post.id,
         content=post.content,
         faculty_tag=post.faculty_tag,
+        image_urls=post.image_urls or [],
         upvotes=0,
         downvotes=0,
         current_user_vote=None,
@@ -189,9 +192,15 @@ async def get_question(
     vote_map = await _user_votes_for([post_id], current_user.id, db)
     question = _row_to_response(row, vote_map.get(post_id))
 
+    # All descendants at any depth via recursive CTE
+    seed = select(Post.id.label("id")).where(Post.parent_post_id == post_id)
+    cte = seed.cte(name="descendants", recursive=True)
+    step = select(Post.id.label("id")).join(cte, Post.parent_post_id == cte.c.id)
+    cte = cte.union_all(step)
+
     answer_rows = (
         await db.execute(
-            _build_qa_select(Post.parent_post_id == post_id).order_by(Post.created_at.asc())
+            _build_qa_select(Post.id.in_(select(cte.c.id))).order_by(Post.created_at.asc())
         )
     ).all()
     answer_votes = await _user_votes_for([r[0].id for r in answer_rows], current_user.id, db)
@@ -223,6 +232,7 @@ async def create_answer(
         post_type="anonymous_qa",
         is_anonymous=True,
         parent_post_id=post_id,
+        image_urls=body.image_urls,
     )
     db.add(answer)
     await db.flush()
@@ -234,6 +244,7 @@ async def create_answer(
     return QAPostResponse(
         id=answer.id,
         content=answer.content,
+        image_urls=answer.image_urls or [],
         upvotes=0,
         downvotes=0,
         current_user_vote=None,
