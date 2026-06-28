@@ -1,15 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
-import { FACULTY_NAMES, Faculty } from "@/lib/faculties";
+import { ImageUploader } from "@/components/ImageUploader";
+import { ImageGrid } from "@/components/ImageGrid";
+
+// ── types ─────────────────────────────────────────────────────────────────────
 
 interface QAPost {
   id: string;
   content: string;
   faculty_tag: string | null;
+  image_urls: string[];
+  parent_post_id: string | null;
   upvotes: number;
   downvotes: number;
   current_user_vote: "up" | "down" | null;
@@ -24,6 +29,35 @@ interface VoteResponse {
   current_user_vote: "up" | "down" | null;
 }
 
+interface TreeNode {
+  post: QAPost;
+  children: TreeNode[];
+}
+
+interface ThreadCtx {
+  replyingToId: string | null;
+  inlineContent: string;
+  inlineImageUrls: string[];
+  inlineImagesUploading: boolean;
+  inlineUploaderKey: number;
+  inlineSubmitting: boolean;
+  inlineError: string | null;
+  onVote: (id: string, type: "up" | "down") => void;
+  onStartReply: (id: string) => void;
+  onSetContent: (v: string) => void;
+  onSetUrls: (urls: string[], uploading: boolean) => void;
+  onSubmitInline: (parentId: string) => void;
+  onCancelInline: () => void;
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+function buildTree(posts: QAPost[], parentId: string): TreeNode[] {
+  return posts
+    .filter((p) => p.parent_post_id === parentId)
+    .map((p) => ({ post: p, children: buildTree(posts, p.id) }));
+}
+
 function timeAgo(iso: string): string {
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
   if (s < 60) return "just now";
@@ -32,184 +66,278 @@ function timeAgo(iso: string): string {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+// ── thread context ─────────────────────────────────────────────────────────────
+
+const Ctx = createContext<ThreadCtx | null>(null);
+
+// ── recursive answer node ──────────────────────────────────────────────────────
+
+function AnswerNode({ node, depth }: { node: TreeNode; depth: number }) {
+  const ctx = useContext(Ctx)!;
+  const p = node.post;
+  const isReplying = ctx.replyingToId === p.id;
+
+  return (
+    <div style={{ marginBottom: "0.5rem" }}>
+      <div
+        style={{
+          borderLeft: depth > 0 ? "2px solid #e8e8e8" : "none",
+          paddingLeft: depth > 0 ? 12 : 0,
+          marginLeft: depth > 0 ? Math.min(depth, 4) * 16 : 0,
+        }}
+      >
+        {p.is_deleted ? (
+          <p style={{ color: "#bbb", margin: "0 0 0.5rem", fontStyle: "italic", fontSize: "0.88rem" }}>[deleted]</p>
+        ) : (
+          <>
+            <div style={{ fontSize: "0.8rem", color: "#888", marginBottom: "0.25rem" }}>
+              Anonymous · {timeAgo(p.created_at)}
+            </div>
+            <ImageGrid urls={p.image_urls ?? []} />
+            {p.content && (
+              <p style={{ margin: "0 0 0.35rem", whiteSpace: "pre-wrap", lineHeight: 1.45, fontSize: "0.93rem" }}>{p.content}</p>
+            )}
+            <div style={{ display: "flex", gap: "0.85rem", alignItems: "center", fontSize: "0.82rem" }}>
+              <button
+                onClick={() => ctx.onVote(p.id, "up")}
+                style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: p.current_user_vote === "up" ? "#e05c00" : "#888", fontWeight: p.current_user_vote === "up" ? "bold" : "normal" }}
+              >▲ {p.upvotes}</button>
+              <button
+                onClick={() => ctx.onVote(p.id, "down")}
+                style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: p.current_user_vote === "down" ? "#5555dd" : "#888", fontWeight: p.current_user_vote === "down" ? "bold" : "normal" }}
+              >▼ {p.downvotes}</button>
+              <button
+                onClick={() => ctx.onStartReply(p.id)}
+                style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: isReplying ? "#111" : "#888", fontWeight: isReplying ? "600" : "normal", fontSize: "0.82rem" }}
+              >💬 Reply</button>
+            </div>
+          </>
+        )}
+
+        {isReplying && (
+          <div style={{ marginTop: "0.5rem" }}>
+            <textarea
+              value={ctx.inlineContent}
+              onChange={(e) => ctx.onSetContent(e.target.value)}
+              placeholder="Reply anonymously…"
+              rows={2}
+              autoFocus
+              style={{ width: "100%", boxSizing: "border-box", padding: "0.45rem 0.6rem", fontSize: "0.9rem", border: "1px solid #ccc", borderRadius: 4, fontFamily: "inherit", resize: "vertical" }}
+            />
+            <ImageUploader key={ctx.inlineUploaderKey} onUrlsChange={ctx.onSetUrls} />
+            {ctx.inlineError && (
+              <p style={{ color: "crimson", margin: "0.2rem 0", fontSize: "0.82rem" }}>{ctx.inlineError}</p>
+            )}
+            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginTop: "0.35rem" }}>
+              <button
+                onClick={() => ctx.onSubmitInline(p.id)}
+                disabled={ctx.inlineSubmitting || ctx.inlineImagesUploading || (!ctx.inlineContent.trim() && !ctx.inlineImageUrls.length)}
+                style={{ padding: "0.3rem 0.8rem", fontSize: "0.85rem", cursor: "pointer", background: "#111", color: "#fff", border: "none", borderRadius: 4 }}
+              >
+                {ctx.inlineImagesUploading ? "Uploading…" : ctx.inlineSubmitting ? "Posting…" : "Reply"}
+              </button>
+              <button
+                onClick={ctx.onCancelInline}
+                style={{ padding: "0.3rem 0.7rem", fontSize: "0.85rem", cursor: "pointer", background: "none", border: "1px solid #ccc", borderRadius: 4 }}
+              >Cancel</button>
+              <span style={{ fontSize: "0.78rem", color: "#aaa" }}>🔒 anonymous</span>
+            </div>
+          </div>
+        )}
+
+        {node.children.length > 0 && (
+          <div style={{ marginTop: "0.5rem" }}>
+            {node.children.map((child) => (
+              <AnswerNode key={child.post.id} node={child} depth={depth + 1} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── page ──────────────────────────────────────────────────────────────────────
+
 export default function QADetailPage() {
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
 
   const [question, setQuestion] = useState<QAPost | null>(null);
-  const [answers, setAnswers] = useState<QAPost[]>([]);
+  const [allAnswers, setAllAnswers] = useState<QAPost[]>([]);
   const [loading, setLoading] = useState(true);
-  const [answerContent, setAnswerContent] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [answerError, setAnswerError] = useState<string | null>(null);
+
+  // Top-level answer form
+  const [topContent, setTopContent] = useState("");
+  const [topImageUrls, setTopImageUrls] = useState<string[]>([]);
+  const [topImagesUploading, setTopImagesUploading] = useState(false);
+  const [topUploaderKey, setTopUploaderKey] = useState(0);
+  const [topSubmitting, setTopSubmitting] = useState(false);
+  const [topError, setTopError] = useState<string | null>(null);
+
+  // Inline reply form
+  const [replyingToId, setReplyingToId] = useState<string | null>(null);
+  const [inlineContent, setInlineContent] = useState("");
+  const [inlineImageUrls, setInlineImageUrls] = useState<string[]>([]);
+  const [inlineImagesUploading, setInlineImagesUploading] = useState(false);
+  const [inlineUploaderKey, setInlineUploaderKey] = useState(0);
+  const [inlineSubmitting, setInlineSubmitting] = useState(false);
+  const [inlineError, setInlineError] = useState<string | null>(null);
 
   useEffect(() => {
     apiFetch<{ question: QAPost; answers: QAPost[] }>(`/api/qa/${id}`)
-      .then((data) => { setQuestion(data.question); setAnswers(data.answers); })
+      .then((data) => { setQuestion(data.question); setAllAnswers(data.answers); })
       .catch(() => router.replace("/login"))
       .finally(() => setLoading(false));
   }, [id, router]);
 
-  async function handleVote(
-    targetId: string,
-    voteType: "up" | "down",
-    isAnswer: boolean
-  ) {
+  async function handleVote(targetId: string, voteType: "up" | "down") {
     try {
       const data = await apiFetch<VoteResponse>(`/api/qa/${targetId}/vote`, {
         method: "POST",
         body: JSON.stringify({ vote_type: voteType }),
       });
-      const apply = (p: QAPost): QAPost =>
-        p.id === targetId
-          ? { ...p, upvotes: data.upvotes, downvotes: data.downvotes, current_user_vote: data.current_user_vote }
-          : p;
-      if (isAnswer) {
-        setAnswers((prev) => prev.map(apply));
-      } else {
-        setQuestion((prev) => (prev ? apply(prev) : prev));
-      }
+      setQuestion((prev) => (prev?.id === targetId ? { ...prev, ...data } : prev));
+      setAllAnswers((prev) => prev.map((p) => (p.id === targetId ? { ...p, ...data } : p)));
     } catch { /* non-critical */ }
   }
 
-  async function handleAnswer(e: React.FormEvent) {
+  async function handleTopAnswer(e: React.FormEvent) {
     e.preventDefault();
-    if (!answerContent.trim()) return;
-    setSubmitting(true);
-    setAnswerError(null);
+    if (!topContent.trim() && !topImageUrls.length) return;
+    if (topImagesUploading) return;
+    setTopSubmitting(true);
+    setTopError(null);
     try {
       const newAnswer = await apiFetch<QAPost>(`/api/qa/${id}/answers`, {
         method: "POST",
-        body: JSON.stringify({ content: answerContent.trim() }),
+        body: JSON.stringify({ content: topContent.trim(), image_urls: topImageUrls }),
       });
-      setAnswers((prev) => [...prev, newAnswer]);
-      setQuestion((prev) =>
-        prev ? { ...prev, reply_count: prev.reply_count + 1 } : prev
-      );
-      setAnswerContent("");
+      setAllAnswers((prev) => [...prev, newAnswer]);
+      setQuestion((prev) => (prev ? { ...prev, reply_count: prev.reply_count + 1 } : prev));
+      setTopContent("");
+      setTopImageUrls([]);
+      setTopUploaderKey((k) => k + 1);
     } catch (err: unknown) {
-      setAnswerError(err instanceof Error ? err.message : "Failed to post answer.");
+      setTopError(err instanceof Error ? err.message : "Failed to post answer.");
     } finally {
-      setSubmitting(false);
+      setTopSubmitting(false);
+    }
+  }
+
+  function startInlineReply(commentId: string) {
+    if (replyingToId === commentId) { setReplyingToId(null); return; }
+    setReplyingToId(commentId);
+    setInlineContent("");
+    setInlineImageUrls([]);
+    setInlineError(null);
+    setInlineUploaderKey((k) => k + 1);
+  }
+
+  async function handleInlineReply(parentId: string) {
+    if (!inlineContent.trim() && !inlineImageUrls.length) return;
+    if (inlineImagesUploading) return;
+    setInlineSubmitting(true);
+    setInlineError(null);
+    try {
+      const newReply = await apiFetch<QAPost>(`/api/qa/${parentId}/answers`, {
+        method: "POST",
+        body: JSON.stringify({ content: inlineContent.trim(), image_urls: inlineImageUrls }),
+      });
+      setAllAnswers((prev) => [...prev, newReply]);
+      setQuestion((prev) => (prev ? { ...prev, reply_count: prev.reply_count + 1 } : prev));
+      setReplyingToId(null);
+      setInlineContent("");
+      setInlineImageUrls([]);
+    } catch (err: unknown) {
+      setInlineError(err instanceof Error ? err.message : "Failed to reply.");
+    } finally {
+      setInlineSubmitting(false);
     }
   }
 
   if (loading) return <p style={{ padding: "2rem", color: "#888" }}>Loading…</p>;
   if (!question) return null;
 
-  const cardStyle: React.CSSProperties = {
-    border: "1px solid #e0e0e0",
-    borderRadius: 8,
-    padding: "1rem",
-    background: "#fff",
+  const tree = buildTree(allAnswers, question.id);
+
+  const ctxValue: ThreadCtx = {
+    replyingToId,
+    inlineContent,
+    inlineImageUrls,
+    inlineImagesUploading,
+    inlineUploaderKey,
+    inlineSubmitting,
+    inlineError,
+    onVote: handleVote,
+    onStartReply: startInlineReply,
+    onSetContent: setInlineContent,
+    onSetUrls: (urls, uploading) => { setInlineImageUrls(urls); setInlineImagesUploading(uploading); },
+    onSubmitInline: handleInlineReply,
+    onCancelInline: () => setReplyingToId(null),
   };
 
   return (
-    <main style={{ maxWidth: 640, margin: "0 auto", padding: "1.5rem 1rem" }}>
-      <Link href="/qa" style={{ fontSize: "0.9rem" }}>← Back to Q&amp;A</Link>
+    <Ctx.Provider value={ctxValue}>
+      <main style={{ maxWidth: 640, margin: "0 auto", padding: "1.5rem 1rem" }}>
+        <Link href="/qa" style={{ fontSize: "0.9rem" }}>← Back to Q&amp;A</Link>
 
-      {/* Question */}
-      <div style={{ ...cardStyle, margin: "1rem 0 1.5rem" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.82rem", color: "#999", marginBottom: "0.5rem" }}>
-          <span>Anonymous · {timeAgo(question.created_at)}</span>
-          {question.faculty_tag && (
-            <span style={{ fontSize: "0.72rem", fontWeight: "bold", padding: "0.15rem 0.5rem", borderRadius: 12, background: "#f0f0f0", color: "#444" }}>
-              {question.faculty_tag}
-            </span>
-          )}
-        </div>
-        <p style={{ margin: "0 0 0.75rem", whiteSpace: "pre-wrap", lineHeight: 1.5, fontSize: "1.05rem" }}>
-          {question.content}
-        </p>
-        <VoteBar post={question} onVote={(t) => handleVote(question.id, t, false)} />
-      </div>
-
-      {/* Answer form */}
-      <form onSubmit={handleAnswer} style={{ marginBottom: "1.5rem" }}>
-        <textarea
-          value={answerContent}
-          onChange={(e) => setAnswerContent(e.target.value)}
-          placeholder="Write an anonymous answer…"
-          rows={3}
-          style={{
-            width: "100%", boxSizing: "border-box", padding: "0.6rem",
-            fontSize: "0.95rem", border: "1px solid #ccc", borderRadius: 4,
-            fontFamily: "inherit", resize: "vertical",
-          }}
-        />
-        <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginTop: "0.5rem" }}>
-          <button
-            type="submit"
-            disabled={submitting || !answerContent.trim()}
-            style={{ padding: "0.5rem 1.2rem", cursor: "pointer" }}
-          >
-            {submitting ? "Posting…" : "Answer anonymously"}
-          </button>
-          <span style={{ fontSize: "0.82rem", color: "#999" }}>
-            🔒 Your name will not be shown
-          </span>
-        </div>
-        {answerError && (
-          <p style={{ color: "crimson", margin: "0.4rem 0 0", fontSize: "0.9rem" }}>
-            {answerError}
-          </p>
-        )}
-      </form>
-
-      {/* Answers */}
-      <h3 style={{ color: "#444", marginBottom: "0.75rem" }}>
-        {answers.length} {answers.length === 1 ? "answer" : "answers"}
-      </h3>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-        {answers.map((answer) => (
-          <div
-            key={answer.id}
-            style={{ ...cardStyle, background: answer.is_deleted ? "#fafafa" : "#fff" }}
-          >
-            {answer.is_deleted ? (
-              <p style={{ color: "#aaa", margin: 0, fontStyle: "italic" }}>[deleted]</p>
-            ) : (
-              <>
-                <div style={{ fontSize: "0.82rem", color: "#999", marginBottom: "0.4rem" }}>
-                  Anonymous · {timeAgo(answer.created_at)}
-                </div>
-                <p style={{ margin: "0 0 0.6rem", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
-                  {answer.content}
-                </p>
-                <VoteBar post={answer} onVote={(t) => handleVote(answer.id, t, true)} />
-              </>
+        {/* Question */}
+        <div style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: "1rem", margin: "1rem 0 1.5rem", background: "#fff" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.82rem", color: "#999", marginBottom: "0.5rem" }}>
+            <span>Anonymous · {timeAgo(question.created_at)}</span>
+            {question.faculty_tag && (
+              <span style={{ fontSize: "0.72rem", fontWeight: "bold", padding: "0.15rem 0.5rem", borderRadius: 12, background: "#f0f0f0", color: "#444" }}>
+                {question.faculty_tag}
+              </span>
             )}
           </div>
-        ))}
-      </div>
-    </main>
-  );
-}
+          <ImageGrid urls={question.image_urls ?? []} />
+          {question.content && (
+            <p style={{ margin: "0 0 0.75rem", whiteSpace: "pre-wrap", lineHeight: 1.5, fontSize: "1.05rem" }}>{question.content}</p>
+          )}
+          <div style={{ display: "flex", gap: "1rem", fontSize: "0.9rem" }}>
+            <button onClick={() => handleVote(question.id, "up")} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: question.current_user_vote === "up" ? "#e05c00" : "#555", fontWeight: question.current_user_vote === "up" ? "bold" : "normal" }}>▲ {question.upvotes}</button>
+            <button onClick={() => handleVote(question.id, "down")} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: question.current_user_vote === "down" ? "#5555dd" : "#555", fontWeight: question.current_user_vote === "down" ? "bold" : "normal" }}>▼ {question.downvotes}</button>
+          </div>
+        </div>
 
-function VoteBar({ post, onVote }: { post: QAPost; onVote: (t: "up" | "down") => void }) {
-  return (
-    <div style={{ display: "flex", gap: "1rem", fontSize: "0.9rem" }}>
-      <button
-        onClick={() => onVote("up")}
-        style={{
-          background: "none", border: "none", cursor: "pointer", padding: 0,
-          color: post.current_user_vote === "up" ? "#e05c00" : "#555",
-          fontWeight: post.current_user_vote === "up" ? "bold" : "normal",
-        }}
-      >
-        ▲ {post.upvotes}
-      </button>
-      <button
-        onClick={() => onVote("down")}
-        style={{
-          background: "none", border: "none", cursor: "pointer", padding: 0,
-          color: post.current_user_vote === "down" ? "#5555dd" : "#555",
-          fontWeight: post.current_user_vote === "down" ? "bold" : "normal",
-        }}
-      >
-        ▼ {post.downvotes}
-      </button>
-    </div>
+        {/* Top-level answer form */}
+        <form onSubmit={handleTopAnswer} style={{ marginBottom: "1.5rem" }}>
+          <textarea
+            value={topContent}
+            onChange={(e) => setTopContent(e.target.value)}
+            placeholder="Write an anonymous answer…"
+            rows={3}
+            style={{ width: "100%", boxSizing: "border-box", padding: "0.6rem", fontSize: "0.95rem", border: "1px solid #ccc", borderRadius: 4, fontFamily: "inherit", resize: "vertical" }}
+          />
+          <ImageUploader
+            key={topUploaderKey}
+            onUrlsChange={(urls, uploading) => { setTopImageUrls(urls); setTopImagesUploading(uploading); }}
+          />
+          <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginTop: "0.5rem" }}>
+            <button
+              type="submit"
+              disabled={topSubmitting || topImagesUploading || (!topContent.trim() && !topImageUrls.length)}
+              style={{ padding: "0.5rem 1.2rem", cursor: "pointer" }}
+            >
+              {topImagesUploading ? "Uploading…" : topSubmitting ? "Posting…" : "Answer anonymously"}
+            </button>
+            <span style={{ fontSize: "0.82rem", color: "#999" }}>🔒 Your name will not be shown</span>
+          </div>
+          {topError && <p style={{ color: "crimson", margin: "0.4rem 0 0", fontSize: "0.9rem" }}>{topError}</p>}
+        </form>
+
+        {/* Answer count + thread */}
+        <div style={{ borderTop: "1px solid #eee", paddingTop: "0.75rem" }}>
+          <h3 style={{ color: "#444", marginTop: 0, marginBottom: "1rem" }}>
+            {allAnswers.length} {allAnswers.length === 1 ? "answer" : "answers"}
+          </h3>
+          {tree.map((node) => (
+            <AnswerNode key={node.post.id} node={node} depth={0} />
+          ))}
+        </div>
+      </main>
+    </Ctx.Provider>
   );
 }

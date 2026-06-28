@@ -2,14 +2,21 @@ import uuid
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 FacultyTag = Optional[Literal['FMS', 'FENS', 'FASS', 'FBA', 'FLW', 'FEDU']]
 
 
 class CreatePostRequest(BaseModel):
-    content: str = Field(min_length=1, max_length=10_000)
+    content: str = Field(default="", max_length=10_000)
     faculty_tag: FacultyTag = None
+    image_urls: list[str] = Field(default_factory=list, max_length=5)
+
+    @model_validator(mode='after')
+    def require_content_or_images(self) -> 'CreatePostRequest':
+        if not self.content.strip() and not self.image_urls:
+            raise ValueError('Post must have text or at least one image.')
+        return self
 
 
 class VoteRequest(BaseModel):
@@ -26,6 +33,7 @@ class PostResponse(BaseModel):
     content: str
     post_type: str
     faculty_tag: Optional[str] = None
+    image_urls: list[str] = []
     author: Optional[AuthorInfo]
     upvotes: int
     downvotes: int

@@ -27,3 +27,6 @@ CLAUDE.md
 
 # Personal / dev-only files
 photos/
+
+# Uploaded images (stored on server, not committed)
+uploads/

@@ -4,12 +4,15 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { ImageUploader } from "@/components/ImageUploader";
+import { ImageGrid } from "@/components/ImageGrid";
 import { FACULTIES, FACULTY_NAMES, Faculty } from "@/lib/faculties";
 
 interface QAPost {
   id: string;
   content: string;
   faculty_tag: string | null;
+  image_urls: string[];
   upvotes: number;
   downvotes: number;
   current_user_vote: "up" | "down" | null;
@@ -56,6 +59,9 @@ export default function QAPage() {
   const [content, setContent] = useState("");
   const [facultyTag, setFacultyTag] = useState<Faculty | "">("");
   const [facultyFilter, setFacultyFilter] = useState<Faculty | null>(null);
+  const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [imagesUploading, setImagesUploading] = useState(false);
+  const [uploaderKey, setUploaderKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
 
@@ -70,18 +76,25 @@ export default function QAPage() {
 
   async function handlePost(e: React.FormEvent) {
     e.preventDefault();
-    if (!content.trim()) return;
+    if (!content.trim() && !imageUrls.length) return;
+    if (imagesUploading) return;
     setSubmitting(true);
     setPostError(null);
     try {
       const newPost = await apiFetch<QAPost>("/api/qa", {
         method: "POST",
-        body: JSON.stringify({ content: content.trim(), faculty_tag: facultyTag || null }),
+        body: JSON.stringify({
+          content: content.trim(),
+          faculty_tag: facultyTag || null,
+          image_urls: imageUrls,
+        }),
       });
       setPosts((prev) => [newPost, ...prev]);
       setTotal((t) => t + 1);
       setContent("");
       setFacultyTag("");
+      setImageUrls([]);
+      setUploaderKey((k) => k + 1);
     } catch (err: unknown) {
       setPostError(err instanceof Error ? err.message : "Failed to post.");
     } finally {
@@ -135,6 +148,10 @@ export default function QAPage() {
           rows={3}
           style={textareaStyle}
         />
+        <ImageUploader
+          key={uploaderKey}
+          onUrlsChange={(urls, uploading) => { setImageUrls(urls); setImagesUploading(uploading); }}
+        />
         <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
           <select
             value={facultyTag}
@@ -153,10 +170,10 @@ export default function QAPage() {
           <span style={{ fontSize: "0.82rem", color: "#999" }}>🔒 Your name will not be shown</span>
           <button
             type="submit"
-            disabled={submitting || !content.trim()}
+            disabled={submitting || imagesUploading || (!content.trim() && !imageUrls.length)}
             style={{ marginLeft: "auto", padding: "0.5rem 1.2rem", cursor: "pointer" }}
           >
-            {submitting ? "Posting…" : "Post anonymously"}
+            {imagesUploading ? "Uploading…" : submitting ? "Posting…" : "Post anonymously"}
           </button>
         </div>
         {postError && (
@@ -211,9 +228,12 @@ export default function QAPage() {
               <span>Anonymous · {timeAgo(post.created_at)}</span>
               {post.faculty_tag && <FacultyBadge tag={post.faculty_tag} />}
             </div>
-            <p style={{ margin: "0 0 0.75rem", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
-              {post.content}
-            </p>
+            <ImageGrid urls={post.image_urls ?? []} />
+            {post.content && (
+              <p style={{ margin: "0 0 0.75rem", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+                {post.content}
+              </p>
+            )}
             <div style={{ display: "flex", gap: "1rem", alignItems: "center", fontSize: "0.9rem" }}>
               <button
                 onClick={() => handleVote(post.id, "up")}

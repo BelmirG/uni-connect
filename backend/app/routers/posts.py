@@ -9,6 +9,7 @@ from sqlalchemy.orm import aliased
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.direct_message import DirectMessage
+from app.models.follow import Follow
 from app.models.post import Post
 from app.models.user import User
 from app.models.vote import Vote
@@ -93,6 +94,7 @@ def _row_to_response(row, current_vote: str | None) -> PostResponse:
         content="[deleted]" if post.is_deleted else post.content,
         post_type=post.post_type,
         faculty_tag=post.faculty_tag,
+        image_urls=post.image_urls or [],
         author=AuthorInfo(username=username, display_name=display_name) if username else None,
         upvotes=upvotes or 0,
         downvotes=downvotes or 0,
@@ -143,6 +145,7 @@ async def create_post(
         content=body.content,
         post_type="feed",
         faculty_tag=body.faculty_tag,
+        image_urls=body.image_urls,
     )
     db.add(post)
     await db.commit()
@@ -153,6 +156,7 @@ async def create_post(
         content=post.content,
         post_type="feed",
         faculty_tag=post.faculty_tag,
+        image_urls=post.image_urls or [],
         author=AuthorInfo(
             username=current_user.username, display_name=current_user.display_name
         ),
@@ -172,6 +176,7 @@ async def list_posts(
     offset: int = 0,
     sort: str = "hot",
     faculty: str | None = None,
+    feed: str = "discover",   # "discover" | "friends"
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -179,15 +184,26 @@ async def list_posts(
     if faculty and faculty not in FACULTIES:
         raise HTTPException(status_code=422, detail="Invalid faculty tag.")
 
-    where = and_(
+    base_conditions = [
         Post.post_type == "feed",
         Post.parent_post_id.is_(None),
         Post.is_deleted == False,
         *([ Post.faculty_tag == faculty ] if faculty else []),
-    )
+    ]
 
-    include_hot = sort == "hot"
-    order = text("hot_score DESC") if include_hot else Post.created_at.desc()
+    if feed == "friends":
+        following_subq = (
+            select(Follow.following_id)
+            .where(Follow.follower_id == current_user.id)
+            .scalar_subquery()
+        )
+        where = and_(*base_conditions, Post.author_id.in_(following_subq))
+        include_hot = False
+        order = Post.created_at.desc()
+    else:
+        where = and_(*base_conditions)
+        include_hot = sort == "hot"
+        order = text("hot_score DESC") if include_hot else Post.created_at.desc()
 
     rows = (
         await db.execute(
@@ -225,10 +241,15 @@ async def get_post(
     vote_map = await _user_votes([post_id], current_user.id, db)
     post_response = _row_to_response(row, vote_map.get(post_id))
 
-    # Replies (oldest first so threads read top-to-bottom)
+    # All descendants at any depth via recursive CTE
+    seed = select(Post.id.label("id")).where(Post.parent_post_id == post_id)
+    cte = seed.cte(name="descendants", recursive=True)
+    step = select(Post.id.label("id")).join(cte, Post.parent_post_id == cte.c.id)
+    cte = cte.union_all(step)
+
     reply_rows = (
         await db.execute(
-            _build_post_select(Post.parent_post_id == post_id)
+            _build_post_select(Post.id.in_(select(cte.c.id)))
             .order_by(Post.created_at.asc())
         )
     ).all()
@@ -260,6 +281,7 @@ async def create_reply(
         post_type=parent.post_type,
         club_id=parent.club_id,  # club posts require club_id on all rows incl. replies
         parent_post_id=post_id,
+        image_urls=body.image_urls,
     )
     db.add(reply)
     await db.commit()
@@ -269,6 +291,7 @@ async def create_reply(
         id=reply.id,
         content=reply.content,
         post_type=reply.post_type,
+        image_urls=reply.image_urls or [],
         author=AuthorInfo(
             username=current_user.username, display_name=current_user.display_name
         ),
