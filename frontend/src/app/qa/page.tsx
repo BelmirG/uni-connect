@@ -46,17 +46,6 @@ interface VoteResponse {
   current_user_vote: "up" | "down" | null;
 }
 
-function AnonAvatar({ size = 36 }: { size?: number }) {
-  return (
-    <div
-      className="rounded-full bg-muted flex items-center justify-center flex-shrink-0 text-muted-foreground font-bold"
-      style={{ width: size, height: size, fontSize: size * 0.42 }}
-    >
-      ?
-    </div>
-  );
-}
-
 function SharePanel({ postId }: { postId: string }) {
   const [open, setOpen] = useState(false);
   const [username, setUsername] = useState("");
@@ -252,8 +241,7 @@ export default function QAPage() {
             return (
               <div key={post.id} className="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
                 {/* Anonymous header */}
-                <div className="flex items-center gap-3 px-4 pt-4 pb-3">
-                  <AnonAvatar size={36} />
+                <div className="flex items-center gap-2 px-4 pt-4 pb-3">
                   <div className="flex-1 min-w-0">
                     <span className="font-semibold text-sm text-foreground">Anonymous</span>
                     <span className="text-muted-foreground text-xs"> · {timeAgo(post.created_at)}</span>
