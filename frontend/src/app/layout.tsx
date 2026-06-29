@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import NavBar from "@/components/NavBar";
+import "./globals.css";
 
 export const metadata: Metadata = {
   title: "IUSConnect",
@@ -13,7 +14,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body style={{ margin: 0, fontFamily: "system-ui, sans-serif", paddingBottom: 65 }}>
+      <body className="pb-16">
         {children}
         <NavBar />
       </body>
