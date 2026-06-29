@@ -76,17 +76,6 @@ function buildTree(posts: QAPost[], parentId: string): TreeNode[] {
 
 const Ctx = createContext<ThreadCtx | null>(null);
 
-function AnonAvatar({ size = 28 }: { size?: number }) {
-  return (
-    <div
-      className="rounded-full bg-muted flex items-center justify-center flex-shrink-0 text-muted-foreground font-bold"
-      style={{ width: size, height: size, fontSize: size * 0.42 }}
-    >
-      ?
-    </div>
-  );
-}
-
 // ── share panel ───────────────────────────────────────────────────────────────
 
 function SharePanel({ postId }: { postId: string }) {
@@ -179,7 +168,6 @@ function AnswerNode({ node, depth }: { node: TreeNode; depth: number }) {
           <>
             {/* Answer header */}
             <div className="flex items-center gap-2 mb-1">
-              <AnonAvatar size={24} />
               <span className="text-xs text-muted-foreground">
                 <span className="font-medium text-foreground">Anonymous</span>
                 {" · "}{timeAgo(p.created_at)}
@@ -432,8 +420,7 @@ export default function QADetailPage() {
 
         {/* Question card */}
         <div className="bg-white border border-border rounded-xl shadow-sm overflow-hidden mb-4">
-          <div className="flex items-center gap-3 px-4 pt-4 pb-3">
-            <AnonAvatar size={40} />
+          <div className="flex items-center gap-2 px-4 pt-4 pb-3">
             <div className="flex-1 min-w-0">
               <span className="font-semibold text-sm text-foreground">Anonymous</span>
               <span className="text-muted-foreground text-xs"> · {timeAgo(question.created_at)}</span>
