@@ -3,12 +3,24 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
+import {
+  ChevronUp,
+  ChevronDown,
+  MessageCircle,
+  Share2,
+  Trash2,
+  X,
+  ArrowLeft,
+  PenLine,
+} from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import UserSearchInput from "@/components/UserSearchInput";
 import { ImageUploader } from "@/components/ImageUploader";
 import { ImageGrid } from "@/components/ImageGrid";
 import MiniAvatar from "@/components/MiniAvatar";
 import { timeAgo } from "@/lib/timeAgo";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -17,7 +29,6 @@ interface Author {
   display_name: string;
   avatar_url: string | null;
 }
-
 
 interface Post {
   id: string;
@@ -72,8 +83,6 @@ function buildTree(posts: Post[], parentId: string): TreeNode[] {
     .map((p) => ({ post: p, children: buildTree(posts, p.id) }));
 }
 
-// ── thread context ─────────────────────────────────────────────────────────────
-
 const Ctx = createContext<ThreadCtx | null>(null);
 
 // ── share panel ───────────────────────────────────────────────────────────────
@@ -84,6 +93,14 @@ function SharePanel({ postId, shareCount }: { postId: string; shareCount: number
   const [msg, setMsg] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+
+  function close() {
+    setOpen(false);
+    setUsername("");
+    setMsg("");
+    setStatus("idle");
+    setError(null);
+  }
 
   async function handleShare(e: React.FormEvent) {
     e.preventDefault();
@@ -96,7 +113,7 @@ function SharePanel({ postId, shareCount }: { postId: string; shareCount: number
         body: JSON.stringify({ recipient_username: username.trim(), post_id: postId, content: msg.trim() }),
       });
       setStatus("sent");
-      setTimeout(() => { setStatus("idle"); setOpen(false); setUsername(""); setMsg(""); }, 2000);
+      setTimeout(close, 1500);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Could not share.");
       setStatus("error");
@@ -104,43 +121,46 @@ function SharePanel({ postId, shareCount }: { postId: string; shareCount: number
   }
 
   return (
-    <span>
+    <>
       <button
-        onClick={() => { setOpen((v) => !v); setStatus("idle"); setError(null); }}
-        style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: "#888", fontSize: "0.82rem" }}
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
       >
-        ↗ {shareCount > 0 ? shareCount : "Share"}
+        <Share2 className="w-3.5 h-3.5" />
+        {shareCount > 0 && <span>{shareCount}</span>}
       </button>
+
       {open && (
-        <form
-          onSubmit={handleShare}
-          style={{ marginTop: "0.5rem", padding: "0.65rem", border: "1px solid #e0e0e0", borderRadius: 6, background: "#fafafa", display: "flex", flexDirection: "column", gap: "0.4rem" }}
-        >
-          <UserSearchInput value={username} onChange={setUsername} onSelect={(u) => setUsername(u)} placeholder="Search by name or username" />
-          <input
-            value={msg}
-            onChange={(e) => setMsg(e.target.value)}
-            placeholder="Add a message (optional)"
-            style={{ padding: "0.4rem 0.6rem", fontSize: "0.85rem", border: "1px solid #ccc", borderRadius: 4, fontFamily: "inherit" }}
-          />
-          {error && <p style={{ margin: 0, fontSize: "0.82rem", color: "crimson" }}>{error}</p>}
-          <div style={{ display: "flex", gap: "0.5rem" }}>
-            <button
-              type="submit"
-              disabled={status === "sending" || !username.trim()}
-              style={{ padding: "0.3rem 0.75rem", fontSize: "0.82rem", cursor: "pointer", background: "#111", color: "#fff", border: "none", borderRadius: 4 }}
-            >
-              {status === "sending" ? "Sharing…" : status === "sent" ? "Shared!" : "Share"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              style={{ padding: "0.3rem 0.7rem", fontSize: "0.82rem", cursor: "pointer", background: "none", border: "1px solid #ccc", borderRadius: 4 }}
-            >Cancel</button>
+        <>
+          <div onClick={close} className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200]" />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(360px,90vw)] bg-white rounded-2xl shadow-2xl z-[201] p-5">
+            <div className="flex items-center justify-between mb-4">
+              <span className="font-semibold text-sm">Share via message</span>
+              <button onClick={close} className="rounded-full p-1 hover:bg-muted text-muted-foreground transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form onSubmit={handleShare} className="space-y-3">
+              <UserSearchInput value={username} onChange={setUsername} onSelect={(u) => setUsername(u)} placeholder="Search by name or username" />
+              <input
+                value={msg}
+                onChange={(e) => setMsg(e.target.value)}
+                placeholder="Add a message (optional)"
+                className="w-full h-9 px-3 text-sm border border-input rounded-md bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              {error && <p className="text-xs text-destructive">{error}</p>}
+              {status === "sent" && <p className="text-xs text-green-600 font-medium">Sent!</p>}
+              <div className="flex gap-2">
+                <Button type="submit" disabled={status === "sending" || status === "sent" || !username.trim()} className="flex-1">
+                  {status === "sending" ? "Sending…" : "Send"}
+                </Button>
+                <Button type="button" variant="outline" onClick={close}>Cancel</Button>
+              </div>
+            </form>
           </div>
-        </form>
+        </>
       )}
-    </span>
+    </>
   );
 }
 
@@ -151,92 +171,118 @@ function CommentNode({ node, depth }: { node: TreeNode; depth: number }) {
   const p = node.post;
   const isOwn = ctx.currentUsername !== null && p.author?.username === ctx.currentUsername;
   const isReplying = ctx.replyingToId === p.id;
+  const voted = p.current_user_vote;
+  const indent = Math.min(depth, 5) * 16;
 
   return (
-    <div style={{ marginBottom: "0.5rem" }}>
+    <div className="mb-1">
       <div
-        style={{
-          borderLeft: depth > 0 ? "2px solid #e8e8e8" : "none",
-          paddingLeft: depth > 0 ? 12 : 0,
-          marginLeft: depth > 0 ? Math.min(depth, 4) * 16 : 0,
-        }}
+        className={cn(depth > 0 && "border-l-2 border-border pl-3")}
+        style={{ marginLeft: indent }}
       >
         {p.is_deleted ? (
-          <p style={{ color: "#bbb", margin: "0 0 0.5rem", fontStyle: "italic", fontSize: "0.88rem" }}>[deleted]</p>
+          <p className="text-muted-foreground/50 italic text-xs py-1">[deleted]</p>
         ) : (
           <>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", marginBottom: "0.35rem" }}>
-              <Link href={`/profile/${p.author?.username}`} style={{ flexShrink: 0 }}>
+            {/* Comment header */}
+            <div className="flex items-center gap-2 mb-1">
+              <Link href={`/profile/${p.author?.username}`} className="flex-shrink-0">
                 <MiniAvatar name={p.author?.display_name ?? "?"} url={p.author?.avatar_url ?? null} size={26} />
               </Link>
-              <div style={{ fontSize: "0.8rem", color: "#888" }}>
-                <Link href={`/profile/${p.author?.username}`} style={{ color: "inherit", textDecoration: "none" }}>
-                  <strong style={{ color: "#333" }}>{p.author?.display_name ?? "Unknown"}</strong>{" "}
-                  @{p.author?.username ?? "?"}
+              <div className="text-xs text-muted-foreground">
+                <Link href={`/profile/${p.author?.username}`} className="no-underline hover:underline">
+                  <span className="font-semibold text-foreground">{p.author?.display_name ?? "Unknown"}</span>
+                  {" "}
+                  <span>@{p.author?.username ?? "?"}</span>
                 </Link>
-                {" · "}{timeAgo(p.created_at)}
+                <span> · {timeAgo(p.created_at)}</span>
               </div>
             </div>
+
+            {/* Comment images */}
             <ImageGrid urls={p.image_urls ?? []} />
+
+            {/* Comment content */}
             {p.content && (
-              <p style={{ margin: "0 0 0.35rem", whiteSpace: "pre-wrap", lineHeight: 1.45, fontSize: "0.93rem" }}>{p.content}</p>
+              <p className="text-sm leading-relaxed whitespace-pre-wrap mb-1.5">{p.content}</p>
             )}
-            <div style={{ display: "flex", gap: "0.85rem", alignItems: "center", fontSize: "0.82rem", flexWrap: "wrap" }}>
+
+            {/* Comment actions */}
+            <div className="flex items-center gap-0.5 -ml-1.5 mb-2">
               <button
                 onClick={() => ctx.onVote(p.id, "up")}
-                style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: p.current_user_vote === "up" ? "#e05c00" : "#888", fontWeight: p.current_user_vote === "up" ? "bold" : "normal" }}
-              >▲ {p.upvotes}</button>
+                className={cn(
+                  "flex items-center gap-0.5 px-1.5 py-1 rounded-md text-xs font-medium transition-colors",
+                  voted === "up" ? "text-orange-500" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                )}
+              >
+                <ChevronUp className="w-3.5 h-3.5" />
+                {p.upvotes}
+              </button>
               <button
                 onClick={() => ctx.onVote(p.id, "down")}
-                style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: p.current_user_vote === "down" ? "#5555dd" : "#888", fontWeight: p.current_user_vote === "down" ? "bold" : "normal" }}
-              >▼ {p.downvotes}</button>
+                className={cn(
+                  "flex items-center gap-0.5 px-1.5 py-1 rounded-md text-xs font-medium transition-colors",
+                  voted === "down" ? "text-indigo-500" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                )}
+              >
+                <ChevronDown className="w-3.5 h-3.5" />
+                {p.downvotes}
+              </button>
               <button
                 onClick={() => ctx.onStartReply(p.id)}
-                style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: isReplying ? "#111" : "#888", fontWeight: isReplying ? "600" : "normal", fontSize: "0.82rem" }}
-              >💬 Reply</button>
+                className={cn(
+                  "flex items-center gap-1 px-1.5 py-1 rounded-md text-xs font-medium transition-colors",
+                  isReplying
+                    ? "text-primary bg-primary/5"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                )}
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+                Reply
+              </button>
               <SharePanel postId={p.id} shareCount={p.share_count} />
               {isOwn && (
                 <button
                   onClick={() => ctx.onDelete(p.id)}
-                  style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: "#ccc", fontSize: "0.82rem", marginLeft: "auto" }}
-                >Delete</button>
+                  className="ml-auto flex items-center px-1.5 py-1 rounded-md text-muted-foreground/40 hover:text-destructive hover:bg-destructive/5 transition-colors"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
               )}
             </div>
           </>
         )}
 
+        {/* Inline reply form */}
         {isReplying && (
-          <div style={{ marginTop: "0.5rem" }}>
+          <div className="mb-3 space-y-2">
             <textarea
               value={ctx.inlineContent}
               onChange={(e) => ctx.onSetContent(e.target.value)}
               placeholder={`Reply to ${p.author?.display_name ?? "comment"}…`}
               rows={2}
               autoFocus
-              style={{ width: "100%", boxSizing: "border-box", padding: "0.45rem 0.6rem", fontSize: "0.9rem", border: "1px solid #ccc", borderRadius: 4, fontFamily: "inherit", resize: "vertical" }}
+              className="w-full resize-none text-sm px-3 py-2 border border-input rounded-xl bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <ImageUploader key={ctx.inlineUploaderKey} onUrlsChange={ctx.onSetUrls} />
-            {ctx.inlineError && (
-              <p style={{ color: "crimson", margin: "0.2rem 0", fontSize: "0.82rem" }}>{ctx.inlineError}</p>
-            )}
-            <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.35rem" }}>
-              <button
+            {ctx.inlineError && <p className="text-xs text-destructive">{ctx.inlineError}</p>}
+            <div className="flex gap-2">
+              <Button
+                size="sm"
                 onClick={() => ctx.onSubmitInline(p.id)}
                 disabled={ctx.inlineSubmitting || ctx.inlineImagesUploading || (!ctx.inlineContent.trim() && !ctx.inlineImageUrls.length)}
-                style={{ padding: "0.3rem 0.8rem", fontSize: "0.85rem", cursor: "pointer", background: "#111", color: "#fff", border: "none", borderRadius: 4 }}
               >
                 {ctx.inlineImagesUploading ? "Uploading…" : ctx.inlineSubmitting ? "Posting…" : "Reply"}
-              </button>
-              <button
-                onClick={ctx.onCancelInline}
-                style={{ padding: "0.3rem 0.7rem", fontSize: "0.85rem", cursor: "pointer", background: "none", border: "1px solid #ccc", borderRadius: 4 }}
-              >Cancel</button>
+              </Button>
+              <Button size="sm" variant="outline" onClick={ctx.onCancelInline}>Cancel</Button>
             </div>
           </div>
         )}
 
+        {/* Nested children */}
         {node.children.length > 0 && (
-          <div style={{ marginTop: "0.5rem" }}>
+          <div className="mt-1">
             {node.children.map((child) => (
               <CommentNode key={child.post.id} node={child} depth={depth + 1} />
             ))}
@@ -258,7 +304,6 @@ export default function PostDetailPage() {
   const [currentUsername, setCurrentUsername] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Top-level comment form (reply to the post itself)
   const [topContent, setTopContent] = useState("");
   const [topImageUrls, setTopImageUrls] = useState<string[]>([]);
   const [topImagesUploading, setTopImagesUploading] = useState(false);
@@ -267,7 +312,6 @@ export default function PostDetailPage() {
   const [topError, setTopError] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
 
-  // Inline reply form (reply to a specific comment)
   const [replyingToId, setReplyingToId] = useState<string | null>(null);
   const [inlineContent, setInlineContent] = useState("");
   const [inlineImageUrls, setInlineImageUrls] = useState<string[]>([]);
@@ -306,7 +350,9 @@ export default function PostDetailPage() {
     try {
       await apiFetch(`/api/posts/${targetId}`, { method: "DELETE" });
       setPost((prev) => (prev?.id === targetId ? { ...prev, is_deleted: true, content: "[deleted]" } : prev));
-      setAllReplies((prev) => prev.map((p) => (p.id === targetId ? { ...p, is_deleted: true, content: "[deleted]" } : p)));
+      setAllReplies((prev) =>
+        prev.map((p) => (p.id === targetId ? { ...p, is_deleted: true, content: "[deleted]" } : p))
+      );
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : "Could not delete.");
     }
@@ -367,11 +413,12 @@ export default function PostDetailPage() {
     }
   }
 
-  if (loading) return <p style={{ padding: "2rem", color: "#888" }}>Loading…</p>;
+  if (loading) return <p className="p-8 text-center text-muted-foreground text-sm">Loading…</p>;
   if (!post) return null;
 
   const tree = buildTree(allReplies, post.id);
   const isOwnPost = currentUsername !== null && post.author?.username === currentUsername;
+  const postVoted = post.current_user_vote;
 
   const ctxValue: ThreadCtx = {
     currentUsername,
@@ -393,101 +440,174 @@ export default function PostDetailPage() {
 
   return (
     <Ctx.Provider value={ctxValue}>
-      <main style={{ maxWidth: 640, margin: "0 auto", padding: "1.5rem 1rem 5rem" }}>
-        <Link href="/feed" style={{ fontSize: "0.9rem" }}>← Back to feed</Link>
+      <main className="max-w-xl mx-auto px-4 pt-4 pb-36">
+        {/* Back link */}
+        <Link
+          href="/feed"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors no-underline mb-4"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to feed
+        </Link>
 
         {/* Original post */}
-        <div style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: "1rem", margin: "1rem 0", background: "#fff" }}>
+        <div className="bg-white border border-border rounded-xl shadow-sm overflow-hidden mb-4">
           {post.is_deleted ? (
-            <p style={{ color: "#aaa", margin: 0, fontStyle: "italic" }}>[deleted]</p>
+            <p className="px-4 py-6 text-muted-foreground italic text-sm">[deleted]</p>
           ) : (
             <>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.55rem", marginBottom: "0.6rem" }}>
-                <Link href={`/profile/${post.author?.username}`} style={{ flexShrink: 0 }}>
-                  <MiniAvatar name={post.author?.display_name ?? "?"} url={post.author?.avatar_url ?? null} size={36} />
+              {/* Post header */}
+              <div className="flex items-center gap-3 px-4 pt-4 pb-3">
+                <Link href={`/profile/${post.author?.username}`} className="flex-shrink-0">
+                  <MiniAvatar name={post.author?.display_name ?? "?"} url={post.author?.avatar_url ?? null} size={40} />
                 </Link>
-                <div style={{ flex: 1 }}>
-                  <Link href={`/profile/${post.author?.username}`} style={{ color: "inherit", textDecoration: "none", fontSize: "0.88rem" }}>
-                    <strong style={{ color: "#222" }}>{post.author?.display_name ?? "Unknown"}</strong>{" "}
-                    <span style={{ color: "#999" }}>@{post.author?.username ?? "?"}</span>
+                <div className="flex-1 min-w-0">
+                  <Link href={`/profile/${post.author?.username}`} className="no-underline hover:underline">
+                    <span className="font-semibold text-sm text-foreground">
+                      {post.author?.display_name ?? "Unknown"}
+                    </span>{" "}
+                    <span className="text-muted-foreground text-xs">
+                      @{post.author?.username ?? "?"}
+                    </span>
                   </Link>
-                  <div style={{ fontSize: "0.78rem", color: "#bbb", display: "flex", gap: "0.4rem", alignItems: "center" }}>
-                    <span>{timeAgo(post.created_at)}</span>
-                    {post.faculty_tag && (
-                      <span style={{ fontSize: "0.72rem", fontWeight: "bold", padding: "0.1rem 0.45rem", borderRadius: 12, background: "#f0f0f0", color: "#444" }}>
-                        {post.faculty_tag}
-                      </span>
-                    )}
-                  </div>
+                  <span className="text-muted-foreground text-xs"> · {timeAgo(post.created_at)}</span>
                 </div>
+                {post.faculty_tag && (
+                  <span className="text-[11px] font-semibold tracking-wide px-2 py-0.5 rounded-full bg-muted text-muted-foreground flex-shrink-0">
+                    {post.faculty_tag}
+                  </span>
+                )}
               </div>
-              <ImageGrid urls={post.image_urls ?? []} />
-              {post.content && (
-                <p style={{ margin: "0 0 0.75rem", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{post.content}</p>
+
+              {/* Post images */}
+              {(post.image_urls ?? []).length > 0 && (
+                <div className="px-4 pb-3">
+                  <ImageGrid urls={post.image_urls} />
+                </div>
               )}
-              <div style={{ display: "flex", gap: "1rem", alignItems: "center", flexWrap: "wrap", fontSize: "0.9rem" }}>
-                <button onClick={() => handleVote(post.id, "up")} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: post.current_user_vote === "up" ? "#e05c00" : "#555", fontWeight: post.current_user_vote === "up" ? "bold" : "normal" }}>▲ {post.upvotes}</button>
-                <button onClick={() => handleVote(post.id, "down")} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: post.current_user_vote === "down" ? "#5555dd" : "#555", fontWeight: post.current_user_vote === "down" ? "bold" : "normal" }}>▼ {post.downvotes}</button>
+
+              {/* Post content */}
+              {post.content && (
+                <p className="px-4 pb-3 text-sm leading-relaxed whitespace-pre-wrap text-foreground">
+                  {post.content}
+                </p>
+              )}
+
+              {/* Post actions */}
+              <div className="flex items-center px-2 py-1 border-t border-border/60">
+                <button
+                  onClick={() => handleVote(post.id, "up")}
+                  className={cn(
+                    "flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                    postVoted === "up" ? "text-orange-500" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                  )}
+                >
+                  <ChevronUp className="w-4 h-4" />
+                  {post.upvotes}
+                </button>
+                <button
+                  onClick={() => handleVote(post.id, "down")}
+                  className={cn(
+                    "flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                    postVoted === "down" ? "text-indigo-500" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                  )}
+                >
+                  <ChevronDown className="w-4 h-4" />
+                  {post.downvotes}
+                </button>
+                <span className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-muted-foreground">
+                  <MessageCircle className="w-4 h-4" />
+                  {post.reply_count} {post.reply_count === 1 ? "comment" : "comments"}
+                </span>
                 <SharePanel postId={post.id} shareCount={post.share_count} />
                 {isOwnPost && (
-                  <button onClick={() => handleDelete(post.id)} style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", padding: 0, color: "#ccc", fontSize: "0.85rem" }}>Delete</button>
+                  <button
+                    onClick={() => handleDelete(post.id)}
+                    className="ml-auto flex items-center px-2.5 py-1.5 rounded-lg text-muted-foreground/40 hover:text-destructive hover:bg-destructive/5 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 )}
               </div>
             </>
           )}
         </div>
 
-        {/* Comment count + thread */}
-        <div style={{ borderTop: "1px solid #eee", paddingTop: "0.75rem" }}>
-          <h3 style={{ color: "#444", marginTop: 0, marginBottom: "1rem" }}>
+        {/* Comments section */}
+        <div>
+          <h3 className="text-sm font-semibold text-muted-foreground mb-3">
             {allReplies.length} {allReplies.length === 1 ? "comment" : "comments"}
           </h3>
           {tree.map((node) => (
             <CommentNode key={node.post.id} node={node} depth={0} />
           ))}
+          {tree.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-6">
+              No comments yet. Be the first to comment!
+            </p>
+          )}
         </div>
       </main>
 
       {/* Fixed compose bar */}
-      <div style={{ position: "fixed", bottom: 60, left: 0, right: 0, background: "#fff", borderTop: "1px solid #e8e8e8", padding: "0.5rem 1rem", zIndex: 50 }}>
-        <div
-          onClick={() => setComposerOpen(true)}
-          style={{ maxWidth: 640, margin: "0 auto", display: "flex", alignItems: "center", padding: "0.6rem 1rem", borderRadius: 20, background: "#f5f5f5", cursor: "text", color: "#aaa", fontSize: "0.95rem" }}
-        >
-          Add a comment…
+      <div className="fixed bottom-16 left-0 right-0 px-4 py-2 bg-white/95 backdrop-blur-sm border-t border-border z-40">
+        <div className="max-w-xl mx-auto">
+          <button
+            onClick={() => setComposerOpen(true)}
+            className="w-full flex items-center gap-3 px-4 py-2.5 rounded-full bg-muted hover:bg-muted/80 transition-colors text-sm text-muted-foreground"
+          >
+            <PenLine className="w-4 h-4 flex-shrink-0" />
+            Add a comment…
+          </button>
         </div>
       </div>
 
+      {/* Compose sheet */}
       {composerOpen && (
         <>
-          <div onClick={() => setComposerOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 100 }} />
-          <div style={{ position: "fixed", bottom: 60, left: "50%", transform: "translateX(-50%)", width: "min(600px, 94vw)", background: "#fff", borderRadius: 16, padding: "1rem 1rem 1.5rem", zIndex: 101, maxHeight: "80vh", overflowY: "auto", boxShadow: "0 4px 32px rgba(0,0,0,0.18)" }}>
-            <div style={{ maxWidth: 640, margin: "0 auto" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
-                <span style={{ fontWeight: "600", fontSize: "1rem" }}>Add a comment</span>
-                <button onClick={() => setComposerOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "1.5rem", color: "#999", lineHeight: 1, padding: "0 0.2rem" }}>×</button>
-              </div>
-              <form onSubmit={handleTopReply}>
+          <div
+            onClick={() => setComposerOpen(false)}
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100]"
+          />
+          <div className="fixed bottom-[4.5rem] left-1/2 -translate-x-1/2 w-[min(600px,94vw)] bg-white rounded-2xl z-[101] shadow-2xl max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
+              <span className="font-semibold text-sm">Add a comment</span>
+              <button
+                onClick={() => setComposerOpen(false)}
+                className="rounded-full p-1 hover:bg-muted text-muted-foreground transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1">
+              <form onSubmit={handleTopReply} className="px-4 py-3 space-y-3">
                 <textarea
                   autoFocus
                   value={topContent}
                   onChange={(e) => setTopContent(e.target.value)}
                   placeholder="Add a comment…"
                   rows={4}
-                  style={{ width: "100%", boxSizing: "border-box", padding: "0.6rem", fontSize: "0.95rem", border: "1px solid #ccc", borderRadius: 4, fontFamily: "inherit", resize: "vertical" }}
+                  className="w-full resize-none text-sm placeholder:text-muted-foreground border-0 outline-none focus:ring-0 bg-transparent min-h-[90px]"
                 />
-                <ImageUploader
-                  key={topUploaderKey}
-                  onUrlsChange={(urls, uploading) => { setTopImageUrls(urls); setTopImagesUploading(uploading); }}
-                />
-                {topError && <p style={{ color: "crimson", margin: "0.25rem 0", fontSize: "0.9rem" }}>{topError}</p>}
-                <button
-                  type="submit"
-                  disabled={topSubmitting || topImagesUploading || (!topContent.trim() && !topImageUrls.length)}
-                  style={{ marginTop: "0.5rem", padding: "0.5rem 1.2rem", cursor: "pointer" }}
-                >
-                  {topImagesUploading ? "Uploading…" : topSubmitting ? "Posting…" : "Comment"}
-                </button>
+                <div className="border-t border-border pt-3 space-y-3">
+                  <ImageUploader
+                    key={topUploaderKey}
+                    onUrlsChange={(urls, uploading) => {
+                      setTopImageUrls(urls);
+                      setTopImagesUploading(uploading);
+                    }}
+                  />
+                  {topError && <p className="text-xs text-destructive">{topError}</p>}
+                  <div className="flex justify-end">
+                    <Button
+                      type="submit"
+                      size="sm"
+                      disabled={topSubmitting || topImagesUploading || (!topContent.trim() && !topImageUrls.length)}
+                    >
+                      {topImagesUploading ? "Uploading…" : topSubmitting ? "Posting…" : "Comment"}
+                    </Button>
+                  </div>
+                </div>
               </form>
             </div>
           </div>
