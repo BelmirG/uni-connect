@@ -30,7 +30,7 @@ IMAGE_MAGIC: dict[str, bytes] = {
     "image/webp": b"RIFF",
 }
 
-# ── documents ─────────────────────────────────────────────────────────────────
+# ── documents (MIME-validated) ────────────────────────────────────────────────
 
 # Old binary Office formats (.doc, .xls, .ppt) support VBA macros — excluded.
 # Open XML formats (.docx, .xlsx, .pptx) are ZIP-based and macro-free by spec.
@@ -50,6 +50,23 @@ FILE_MAGIC: dict[str, bytes] = {
     "application/vnd.openxmlformats-officedocument.presentationml.presentation": b"PK\x03\x04",
 }
 
+# ── text / code files (extension-validated) ───────────────────────────────────
+
+# MIME types for code files are unreliable across browsers and OSes
+# (e.g. .ts is reported as video/mp2t on some platforms), so we validate
+# by extension instead. All are served as text/plain; charset=utf-8 which
+# forces the browser to display them as text regardless of content,
+# eliminating any risk of script execution.
+TEXT_EXTENSIONS: frozenset[str] = frozenset({
+    ".txt", ".md", ".csv",
+    ".py", ".js", ".ts", ".jsx", ".tsx",
+    ".java", ".c", ".cpp", ".h", ".cs",
+    ".go", ".rs", ".rb", ".php",
+    ".json", ".yaml", ".yml", ".toml", ".xml",
+    ".sh", ".sql", ".r", ".ipynb",
+})
+TEXT_MAX_BYTES = 1 * 1024 * 1024  # 1 MB
+
 _UNSAFE_CHARS = re.compile(r'[^\w\s\-.]', re.UNICODE)
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -65,11 +82,20 @@ def _check_magic(data: bytes, mime: str, magic_table: dict[str, bytes]) -> bool:
     return data[: len(expected)] == expected
 
 
+def _is_text(data: bytes) -> bool:
+    """Return True if the file appears to be plain text.
+
+    Null bytes appear in virtually every binary/executable format but never
+    in valid text files, making this a fast and reliable heuristic.
+    """
+    return b"\x00" not in data[:8192]
+
+
 def _sanitize_filename(raw: str, expected_ext: str) -> str:
     """Return a safe display name, always ending with expected_ext.
 
-    Stripping all but the last extension defeats double-extension tricks
-    (e.g. "malware.exe.docx") that trick OS file managers hiding extensions.
+    Stripping all but the final extension defeats double-extension tricks
+    (e.g. "malware.exe.py") that trick OS file managers that hide extensions.
     """
     raw = raw.replace("\x00", "").replace("/", "").replace("\\", "")
     raw = _UNSAFE_CHARS.sub("", raw).strip()
@@ -113,38 +139,59 @@ async def upload_file(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):
-    if file.content_type not in ALLOWED_FILE_TYPES:
-        raise HTTPException(
-            status_code=422,
-            detail="Only PDF, Word (.docx), Excel (.xlsx), and PowerPoint (.pptx) files are allowed.",
-        )
+    ext = Path(file.filename or "").suffix.lower()
 
-    data = await file.read()
+    # ── path 1: document (PDF / Open XML) — validated by MIME + magic bytes ──
+    if file.content_type in ALLOWED_FILE_TYPES:
+        data = await file.read()
 
-    if len(data) > FILE_MAX_BYTES:
-        raise HTTPException(status_code=413, detail="File must be under 20 MB.")
+        if len(data) > FILE_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="File must be under 20 MB.")
 
-    # Verify actual bytes match the claimed MIME type.
-    # This blocks renamed executables (e.g. malware.exe renamed to file.pdf).
-    if not _check_magic(data, file.content_type, FILE_MAGIC):
-        raise HTTPException(
-            status_code=422,
-            detail="File content does not match the declared document type.",
-        )
+        if not _check_magic(data, file.content_type, FILE_MAGIC):
+            raise HTTPException(
+                status_code=422,
+                detail="File content does not match the declared document type.",
+            )
 
-    ext = ALLOWED_FILE_TYPES[file.content_type]
-    stored_name = f"{uuid.uuid4()}{ext}"
+        stored_ext = ALLOWED_FILE_TYPES[file.content_type]
+        stored_name = f"{uuid.uuid4()}{stored_ext}"
+        (FILESTORE_DIR / stored_name).write_bytes(data)
 
-    # Files are stored outside the StaticFiles mount (/app/filestore, not /app/uploads).
-    # They are only reachable via /api/files/{filename}, which enforces auth and
-    # sets Content-Disposition, X-Content-Type-Options, and Cache-Control headers.
-    (FILESTORE_DIR / stored_name).write_bytes(data)
+        return {
+            "url": f"/api/files/{stored_name}",
+            "name": _sanitize_filename(file.filename or "file", stored_ext),
+            "size": len(data),
+            "mime_type": file.content_type,
+        }
 
-    display_name = _sanitize_filename(file.filename or "file", ext)
+    # ── path 2: text / code — validated by extension + null-byte check ────────
+    if ext in TEXT_EXTENSIONS:
+        data = await file.read()
 
-    return {
-        "url": f"/api/files/{stored_name}",
-        "name": display_name,
-        "size": len(data),
-        "mime_type": file.content_type,
-    }
+        if len(data) > TEXT_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="Text/code files must be under 1 MB.")
+
+        if not _is_text(data):
+            raise HTTPException(
+                status_code=422,
+                detail="File appears to be binary. Only plain text and source code files are accepted.",
+            )
+
+        stored_name = f"{uuid.uuid4()}{ext}"
+        (FILESTORE_DIR / stored_name).write_bytes(data)
+
+        return {
+            "url": f"/api/files/{stored_name}",
+            "name": _sanitize_filename(file.filename or "file", ext),
+            "size": len(data),
+            "mime_type": "text/plain",
+        }
+
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            "Unsupported file type. Allowed: PDF, Word (.docx), Excel (.xlsx), "
+            "PowerPoint (.pptx), and common text/code files."
+        ),
+    )

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Paperclip, X, Loader2, FileText, FileSpreadsheet, Presentation } from "lucide-react";
+import { Paperclip, X, Loader2, FileText, FileSpreadsheet, Presentation, Code } from "lucide-react";
 
 export interface FileAttachment {
   url: string;
@@ -23,18 +23,39 @@ interface Props {
 }
 
 // Old binary Office formats (.doc, .xls, .ppt) support VBA macros — excluded.
-// Only accept Open XML formats (macro-free) and PDF.
+// MIME types for code files are unreliable across browsers, so code/text types
+// are listed by extension instead.
 const ACCEPT = [
+  // Documents (by MIME — reliable)
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  // Text / code (by extension — MIME unreliable, e.g. .ts reported as video/mp2t)
+  ".txt", ".md", ".csv",
+  ".py", ".js", ".ts", ".jsx", ".tsx",
+  ".java", ".c", ".cpp", ".h", ".cs",
+  ".go", ".rs", ".rb", ".php",
+  ".json", ".yaml", ".yml", ".toml", ".xml",
+  ".sh", ".sql", ".r", ".ipynb",
 ].join(",");
 
-function fileIcon(mime: string) {
+const CODE_EXTS = new Set([
+  ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".c", ".cpp", ".h",
+  ".cs", ".go", ".rs", ".rb", ".php", ".sh", ".sql", ".r", ".ipynb",
+  ".json", ".yaml", ".yml", ".toml", ".xml",
+]);
+
+function fileIcon(mime: string, name: string) {
   if (mime === "application/pdf") return <FileText className="w-4 h-4 text-red-500" />;
   if (mime.includes("spreadsheet") || mime.includes("excel")) return <FileSpreadsheet className="w-4 h-4 text-green-600" />;
   if (mime.includes("presentation") || mime.includes("powerpoint")) return <Presentation className="w-4 h-4 text-orange-500" />;
+  if (mime === "text/plain") {
+    const ext = name.includes(".") ? "." + name.split(".").pop()!.toLowerCase() : "";
+    return CODE_EXTS.has(ext)
+      ? <Code className="w-4 h-4 text-purple-500" />
+      : <FileText className="w-4 h-4 text-muted-foreground" />;
+  }
   return <FileText className="w-4 h-4 text-blue-500" />;
 }
 
@@ -153,7 +174,7 @@ export function FileUploader({ onChange, maxFiles = 5 }: Props) {
                 <FileText className="w-4 h-4 text-destructive flex-shrink-0" />
               ) : (
                 <span className="flex-shrink-0">
-                  {fileIcon(entry.attachment!.mime_type)}
+                  {fileIcon(entry.attachment!.mime_type, entry.localName)}
                 </span>
               )}
               <span className="flex-1 min-w-0 truncate text-foreground">

@@ -11,24 +11,47 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 
 FILESTORE_DIR = Path("/app/filestore")
 
-# MIME type → file extension for stored files
-MIME_TO_EXT: dict[str, str] = {
-    "application/pdf": ".pdf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+# ── MIME map for document types ───────────────────────────────────────────────
+
+DOC_EXT_TO_MIME: dict[str, str] = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
 
-EXT_TO_MIME: dict[str, str] = {v: k for k, v in MIME_TO_EXT.items()}
+# Text/code files — all served as text/plain regardless of source extension.
+# This ensures even .html or .xml cannot be rendered as markup by the browser.
+TEXT_EXTENSIONS: frozenset[str] = frozenset({
+    ".txt", ".md", ".csv",
+    ".py", ".js", ".ts", ".jsx", ".tsx",
+    ".java", ".c", ".cpp", ".h", ".cs",
+    ".go", ".rs", ".rb", ".php",
+    ".json", ".yaml", ".yml", ".toml", ".xml",
+    ".sh", ".sql", ".r", ".ipynb",
+})
 
-# PDFs are opened inline (browser PDF viewer); Office files are force-downloaded.
-INLINE_MIME_TYPES = {"application/pdf"}
+ALLOWED_EXTENSIONS: frozenset[str] = frozenset(DOC_EXT_TO_MIME) | TEXT_EXTENSIONS
 
-# Allowed filename pattern: UUID + known extension only
-_SAFE_FILENAME = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-    r"\.(pdf|docx|xlsx|pptx)$"
-)
+# PDFs and all text/code files are rendered inline in the browser.
+# Office files are force-downloaded (Content-Disposition: attachment).
+INLINE_EXTENSIONS: frozenset[str] = frozenset({".pdf"}) | TEXT_EXTENSIONS
+
+# Stored filenames are always UUID + allowed extension — no path components possible.
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+def _validate_filename(filename: str) -> tuple[bool, str]:
+    """Return (valid, ext). Splits on the FIRST dot to handle extensions cleanly."""
+    parts = filename.split(".", 1)
+    if len(parts) != 2:
+        return False, ""
+    stem, raw_ext = parts[0], f".{parts[1]}"
+    if not _UUID.match(stem):
+        return False, ""
+    if raw_ext not in ALLOWED_EXTENSIONS:
+        return False, ""
+    return True, raw_ext
 
 
 @router.get("/{filename}")
@@ -36,29 +59,34 @@ async def serve_file(
     filename: str,
     current_user: User = Depends(get_current_user),
 ):
-    # Strict allowlist: only UUID-named files with known extensions
-    if not _SAFE_FILENAME.match(filename):
+    valid, ext = _validate_filename(filename)
+    if not valid:
         raise HTTPException(status_code=400, detail="Invalid filename.")
 
     path = FILESTORE_DIR / filename
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="File not found.")
 
-    ext = path.suffix.lower()
-    mime = EXT_TO_MIME.get(ext, "application/octet-stream")
-    disposition = "inline" if mime in INLINE_MIME_TYPES else "attachment"
+    is_text = ext in TEXT_EXTENSIONS
+    is_inline = ext in INLINE_EXTENSIONS
+
+    if is_text:
+        media_type = "text/plain; charset=utf-8"
+    else:
+        media_type = DOC_EXT_TO_MIME.get(ext, "application/octet-stream")
+
+    disposition = "inline" if is_inline else "attachment"
 
     return FileResponse(
         path=path,
-        media_type=mime,
+        media_type=media_type,
         headers={
-            # Force download for Office files; inline rendering for PDFs.
             "Content-Disposition": f'{disposition}; filename="{filename}"',
-            # Prevent browsers from MIME-sniffing the response.
+            # Prevent MIME sniffing — browser must honour the declared Content-Type.
             "X-Content-Type-Options": "nosniff",
-            # Do not cache potentially sensitive files.
+            # No caching of potentially sensitive academic files.
             "Cache-Control": "private, no-store",
-            # Restrict what a PDF loaded inline can do.
-            "Content-Security-Policy": "sandbox allow-scripts",
+            # Sandbox inline content so it cannot run scripts or access the parent page.
+            "Content-Security-Policy": "sandbox",
         },
     )
