@@ -69,6 +69,7 @@ def _build_msg_payload(
     return {
         "id": str(msg.id),
         "content": msg.content,
+        "attachments": msg.attachments or [],
         "shared_post": shared,
         "sender": {"username": sender.username, "display_name": sender.display_name, "avatar_url": sender.avatar_url},
         "created_at": msg.created_at.isoformat(),
@@ -447,8 +448,20 @@ async def dm_websocket(websocket: WebSocket, conversation_id: str):
 
                 content = (data.get("content") or "").strip()
                 shared_post_id_str = data.get("shared_post_id")
+                raw_attachments = data.get("attachments") or []
+                # Sanitise: keep only the fields we expect, discard anything else
+                attachments = [
+                    {
+                        "url": str(a.get("url", "")),
+                        "name": str(a.get("name", ""))[:255],
+                        "size": int(a.get("size", 0)),
+                        "mime_type": str(a.get("mime_type", "")),
+                    }
+                    for a in raw_attachments
+                    if isinstance(a, dict) and a.get("url")
+                ][:5]
 
-                if not content and not shared_post_id_str:
+                if not content and not shared_post_id_str and not attachments:
                     continue
 
                 shared_post = None
@@ -475,6 +488,7 @@ async def dm_websocket(websocket: WebSocket, conversation_id: str):
                     sender_id=user.id,
                     content=content or None,
                     shared_post_id=shared_post_uuid,
+                    attachments=attachments,
                 )
                 db.add(dm)
                 await db.commit()

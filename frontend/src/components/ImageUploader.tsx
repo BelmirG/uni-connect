@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 
 interface Preview {
   localUrl: string;
@@ -16,9 +17,19 @@ interface Props {
 
 export function ImageUploader({ onUrlsChange, maxImages = 5 }: Props) {
   const [previews, setPreviews] = useState<Preview[]>([]);
+  const [lightbox, setLightbox] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const cbRef = useRef(onUrlsChange);
   cbRef.current = onUrlsChange;
+
+  const closeLightbox = useCallback(() => setLightbox(null), []);
+
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeLightbox(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightbox, closeLightbox]);
 
   useEffect(() => {
     const urls = previews.filter((p) => p.remoteUrl !== null).map((p) => p.remoteUrl!);
@@ -116,6 +127,7 @@ export function ImageUploader({ onUrlsChange, maxImages = 5 }: Props) {
               <img
                 src={p.localUrl}
                 alt=""
+                onClick={() => setLightbox(p.localUrl)}
                 style={{
                   width: 72,
                   height: 72,
@@ -123,6 +135,7 @@ export function ImageUploader({ onUrlsChange, maxImages = 5 }: Props) {
                   borderRadius: 4,
                   display: "block",
                   border: p.error ? "2px solid #e53935" : "1px solid #e0e0e0",
+                  cursor: "zoom-in",
                 }}
               />
               {p.uploading && (
@@ -187,6 +200,63 @@ export function ImageUploader({ onUrlsChange, maxImages = 5 }: Props) {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Lightbox — rendered in a portal so position:fixed is relative to the
+          viewport, not the composer panel (which has a CSS transform that would
+          otherwise confine the overlay to the panel's bounds). */}
+      {lightbox && createPortal(
+        <div
+          onClick={(e) => { e.stopPropagation(); closeLightbox(); }}
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(0,0,0,0.85)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <img
+            src={lightbox}
+            alt="Preview"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: "90vw",
+              maxHeight: "90vh",
+              objectFit: "contain",
+              borderRadius: 8,
+              boxShadow: "0 8px 40px rgba(0,0,0,0.6)",
+            }}
+          />
+          <button
+            onClick={(e) => { e.stopPropagation(); closeLightbox(); }}
+            onMouseDown={(e) => e.stopPropagation()}
+            aria-label="Close preview"
+            style={{
+              position: "absolute",
+              top: 16,
+              right: 16,
+              width: 36,
+              height: 36,
+              borderRadius: "50%",
+              background: "rgba(255,255,255,0.15)",
+              border: "none",
+              color: "#fff",
+              fontSize: "1.2rem",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            ×
+          </button>
+        </div>,
+        document.body
       )}
     </div>
   );
