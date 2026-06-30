@@ -37,6 +37,7 @@ export default function ClubsPage() {
   const [clubs, setClubs] = useState<Club[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<"my" | "discover">("my");
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -128,6 +129,24 @@ export default function ClubsPage() {
           </button>
         </div>
 
+        {/* Tabs */}
+        <div className="flex gap-1 p-1 bg-muted rounded-xl mb-4">
+          {(["my", "discover"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={cn(
+                "flex-1 text-sm font-semibold py-1.5 rounded-lg transition-colors",
+                tab === t
+                  ? "bg-white text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {t === "my" ? "My Clubs" : "Discover"}
+            </button>
+          ))}
+        </div>
+
         {/* Pending invitations */}
         {invitations.length > 0 && (
           <div className="mb-4">
@@ -162,14 +181,22 @@ export default function ClubsPage() {
 
         {/* List */}
         {loading && <p className="text-muted-foreground text-sm text-center py-8">Loading…</p>}
-        {!loading && clubs.length === 0 && (
+        {!loading && tab === "my" && clubs.filter((c) => c.is_member).length === 0 && (
           <p className="text-muted-foreground text-sm text-center py-8">
-            No clubs yet. Create the first one!
+            You haven&apos;t joined any clubs yet.{" "}
+            <button onClick={() => setTab("discover")} className="underline text-foreground">
+              Discover clubs
+            </button>
+          </p>
+        )}
+        {!loading && tab === "discover" && clubs.filter((c) => !c.is_member).length === 0 && (
+          <p className="text-muted-foreground text-sm text-center py-8">
+            You&apos;re a member of all available clubs!
           </p>
         )}
 
         <div className="space-y-3">
-          {clubs.map((club) => (
+          {clubs.filter((c) => tab === "my" ? c.is_member : !c.is_member).map((club) => (
             <div key={club.id} className="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
               <Link href={`/clubs/${club.slug}`} className="block px-4 pt-4 pb-3 no-underline">
                 <div className="flex items-start justify-between gap-2">

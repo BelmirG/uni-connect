@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import { apiFetch, ApiError } from "@/lib/api";
-import { ArrowLeft, Send, MoreVertical, Trash2, X, CornerUpLeft } from "lucide-react";
+import { ArrowLeft, Send, MoreVertical, Trash2, X, CornerUpLeft, Plus, ImageIcon, FileText, Download, ExternalLink, GalleryHorizontalEnd, ChevronLeft, ChevronRight } from "lucide-react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import MiniAvatar from "@/components/MiniAvatar";
 
@@ -22,9 +23,27 @@ interface SharedPost {
   author: Author | null;
 }
 
+interface FileAttachment {
+  url: string;
+  name: string;
+  size: number;
+  mime_type: string;
+}
+
+interface PendingAttachment {
+  uid: string;
+  localUrl?: string;
+  attachment: FileAttachment | null;
+  uploading: boolean;
+  error: string | null;
+  name: string;
+  mime_type: string;
+}
+
 interface DmMessage {
   id: string;
   content: string | null;
+  attachments: FileAttachment[];
   shared_post: SharedPost | null;
   sender: Author;
   created_at: string;
@@ -37,6 +56,66 @@ interface ConvResponse {
 
 function timeLabel(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function fmtSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function MsgAttachments({ attachments, isOwn, onPreview }: {
+  attachments: FileAttachment[];
+  isOwn: boolean;
+  onPreview: (urls: string[], index: number) => void;
+}) {
+  if (!attachments.length) return null;
+  const images = attachments.filter(a => a.mime_type.startsWith("image/"));
+  const docs = attachments.filter(a => !a.mime_type.startsWith("image/"));
+  const isPdf = (a: FileAttachment) => a.mime_type === "application/pdf";
+  const isText = (a: FileAttachment) => a.mime_type === "text/plain";
+  const imageUrls = images.map(img => img.url);
+
+  return (
+    <div className="mt-1.5 space-y-1.5">
+      {images.length > 0 && (
+        <div className={cn("grid gap-1", images.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
+          {images.map((a, i) => (
+            <img
+              key={i}
+              src={a.url}
+              alt={a.name}
+              onClick={() => onPreview(imageUrls, i)}
+              className="rounded-lg object-cover cursor-zoom-in w-full"
+              style={{ maxHeight: 200 }}
+            />
+          ))}
+        </div>
+      )}
+      {docs.map((a, i) => (
+        <a
+          key={i}
+          href={a.url}
+          {...(isPdf(a) || isText(a)
+            ? { target: "_blank", rel: "noopener noreferrer" }
+            : { download: a.name }
+          )}
+          className={cn(
+            "flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs no-underline",
+            isOwn ? "bg-white/15 text-white hover:bg-white/25" : "bg-muted text-foreground hover:bg-muted/80"
+          )}
+        >
+          <FileText className="w-3.5 h-3.5 flex-shrink-0 opacity-70" />
+          <span className="flex-1 min-w-0 truncate font-medium">{a.name}</span>
+          <span className="opacity-60 flex-shrink-0">{fmtSize(a.size)}</span>
+          {isPdf(a) || isText(a)
+            ? <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-60" />
+            : <Download className="w-3 h-3 flex-shrink-0 opacity-60" />
+          }
+        </a>
+      ))}
+    </div>
+  );
 }
 
 function parseContent(content: string | null): { quote: string | null; body: string } {
@@ -86,6 +165,7 @@ function SwipeableMessage({
   onScrollToQuote,
   onHoverEnter,
   onHoverLeave,
+  onPreviewImage,
   msgRef,
 }: {
   msg: DmMessage;
@@ -95,6 +175,7 @@ function SwipeableMessage({
   onScrollToQuote: (quote: string) => void;
   onHoverEnter: () => void;
   onHoverLeave: () => void;
+  onPreviewImage: (urls: string[], index: number) => void;
   msgRef: (el: HTMLDivElement | null) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -194,6 +275,9 @@ function SwipeableMessage({
           </button>
         )}
         {body && <span className="whitespace-pre-wrap break-words">{body}</span>}
+        {(msg.attachments ?? []).length > 0 && (
+          <MsgAttachments attachments={msg.attachments} isOwn={isOwn} onPreview={onPreviewImage} />
+        )}
         {msg.shared_post && <SharedPostCard post={msg.shared_post} isOwn={isOwn} />}
         <span className={cn(
           "text-[10px] self-end mt-1 ml-2 flex-shrink-0",
@@ -220,6 +304,157 @@ function SwipeableMessage({
   );
 }
 
+function LightboxPortal({ urls, index, onChange, onClose }: {
+  urls: string[];
+  index: number;
+  onChange: (idx: number) => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "ArrowLeft" && index > 0) onChange(index - 1);
+      if (e.key === "ArrowRight" && index < urls.length - 1) onChange(index + 1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [index, urls.length, onChange, onClose]);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center" }}
+    >
+      <img
+        src={urls[index]}
+        alt="Preview"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: "90vw", maxHeight: "90vh", objectFit: "contain", borderRadius: 8 }}
+      />
+
+      {/* Prev */}
+      {index > 0 && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onChange(index - 1); }}
+          style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+        >
+          <ChevronLeft style={{ width: 20, height: 20 }} />
+        </button>
+      )}
+
+      {/* Next */}
+      {index < urls.length - 1 && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onChange(index + 1); }}
+          style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+        >
+          <ChevronRight style={{ width: 20, height: 20 }} />
+        </button>
+      )}
+
+      {/* Counter */}
+      {urls.length > 1 && (
+        <div style={{ position: "absolute", top: 16, left: "50%", transform: "translateX(-50%)", background: "rgba(0,0,0,0.5)", color: "#fff", fontSize: "0.75rem", padding: "4px 10px", borderRadius: 20 }}>
+          {index + 1} / {urls.length}
+        </div>
+      )}
+
+      {/* Close */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onClose(); }}
+        style={{ position: "absolute", top: 16, right: 16, width: 36, height: 36, borderRadius: "50%", background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", fontSize: "1.2rem", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+      >×</button>
+    </div>
+  );
+}
+
+function MediaSheet({
+  photos,
+  docs,
+  isPdf,
+  isText,
+  onPreview,
+}: {
+  photos: FileAttachment[];
+  docs: FileAttachment[];
+  isPdf: (a: FileAttachment) => boolean;
+  isText: (a: FileAttachment) => boolean;
+  onPreview: (urls: string[], index: number) => void;
+}) {
+  const [tab, setTab] = useState<"media" | "docs">("media");
+  return (
+    <>
+      {/* Tab bar */}
+      <div className="flex border-b border-border flex-shrink-0">
+        {(["media", "docs"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={cn(
+              "flex-1 py-2.5 text-sm font-semibold transition-colors relative",
+              tab === t ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            {t === "media" ? "Media" : "Docs"}
+            {tab === t && (
+              <span className="absolute bottom-0 left-1/4 right-1/4 h-0.5 bg-primary rounded-full" />
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div className="overflow-y-auto flex-1 p-4">
+        {tab === "media" && (
+          photos.length === 0
+            ? <p className="text-sm text-muted-foreground text-center py-10">No photos yet.</p>
+            : <div className="grid grid-cols-7 gap-0.5">
+                {photos.map((a, i) => (
+                  <img
+                    key={i}
+                    src={a.url}
+                    alt={a.name}
+                    onClick={() => onPreview(photos.map(p => p.url), i)}
+                    className="aspect-square object-cover rounded-sm cursor-zoom-in w-full"
+                  />
+                ))}
+              </div>
+        )}
+
+        {tab === "docs" && (
+          docs.length === 0
+            ? <p className="text-sm text-muted-foreground text-center py-10">No files yet.</p>
+            : <div className="space-y-2 mx-4">
+                {docs.map((a, i) => (
+                  <a
+                    key={i}
+                    href={a.url}
+                    {...(isPdf(a) || isText(a)
+                      ? { target: "_blank", rel: "noopener noreferrer" }
+                      : { download: a.name }
+                    )}
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-border bg-muted/40 hover:bg-muted transition-colors no-underline group"
+                  >
+                    <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-medium text-foreground truncate">{a.name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {fmtSize(a.size)}{isPdf(a) || isText(a) ? " · Opens in browser" : " · Click to download"}
+                      </span>
+                    </span>
+                    {isPdf(a) || isText(a)
+                      ? <ExternalLink className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground flex-shrink-0" />
+                      : <Download className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground flex-shrink-0" />
+                    }
+                  </a>
+                ))}
+              </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 export default function ConversationPage() {
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
@@ -232,12 +467,18 @@ export default function ConversationPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [replyTo, setReplyTo] = useState<DmMessage | null>(null);
   const [hoveredMsgId, setHoveredMsgId] = useState<string | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
+  const [mediaOpen, setMediaOpen] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const msgRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const messagesRef = useRef<DmMessage[]>([]);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
@@ -313,15 +554,85 @@ export default function ConversationPage() {
     setTimeout(() => { el.style.transition = ""; }, 1500);
   }
 
+  async function uploadFile(file: File, endpoint: string): Promise<FileAttachment> {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(endpoint, { method: "POST", credentials: "include", body: fd });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { detail?: string };
+      throw new Error(body.detail ?? "Upload failed");
+    }
+    return res.json() as Promise<FileAttachment>;
+  }
+
+  async function handleMediaSelect(e: React.ChangeEvent<HTMLInputElement>, endpoint: string) {
+    const files = Array.from(e.target.files ?? []).slice(0, 5 - pendingAttachments.length);
+    if (e.target) e.target.value = "";
+    if (!files.length) return;
+    setAttachMenuOpen(false);
+
+    const newPending: PendingAttachment[] = files.map((f) => ({
+      uid: crypto.randomUUID(),
+      localUrl: f.type.startsWith("image/") ? URL.createObjectURL(f) : undefined,
+      attachment: null,
+      uploading: true,
+      error: null,
+      name: f.name,
+      mime_type: f.type,
+    }));
+    setPendingAttachments((prev) => [...prev, ...newPending]);
+
+    await Promise.all(
+      files.map(async (file, i) => {
+        const uid = newPending[i].uid;
+        try {
+          const raw = await uploadFile(file, endpoint);
+          // The image endpoint only returns {url}. Enrich with file metadata so
+          // mime_type is available for correct rendering in the chat bubble.
+          const attachment: FileAttachment = {
+            url: raw.url,
+            name: raw.name ?? file.name,
+            size: raw.size ?? file.size,
+            mime_type: raw.mime_type ?? file.type,
+          };
+          setPendingAttachments((prev) =>
+            prev.map((a) => a.uid === uid ? { ...a, attachment, uploading: false } : a)
+          );
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : "Upload failed";
+          setPendingAttachments((prev) =>
+            prev.map((a) => a.uid === uid ? { ...a, uploading: false, error: msg } : a)
+          );
+        }
+      })
+    );
+  }
+
+  function removePending(uid: string) {
+    setPendingAttachments((prev) => prev.filter((a) => a.uid !== uid));
+  }
+
   function send() {
     const text = input.trim();
-    if (!text || status !== "connected" || !wsRef.current) return;
-    const payload = replyTo
-      ? `> ${(replyTo.content ?? "[post]").slice(0, 80)}\n\n${text}`
-      : text;
-    wsRef.current.send(JSON.stringify({ content: payload }));
+    const readyAttachments = pendingAttachments
+      .filter((a) => a.attachment !== null)
+      .map((a) => a.attachment!);
+    const stillUploading = pendingAttachments.some((a) => a.uploading);
+
+    if ((!text && readyAttachments.length === 0) || stillUploading || status !== "connected" || !wsRef.current) return;
+
+    const wsPayload: Record<string, unknown> = {};
+    if (text) {
+      wsPayload.content = replyTo
+        ? `> ${(replyTo.content ?? "[post]").slice(0, 80)}\n\n${text}`
+        : text;
+    }
+    if (readyAttachments.length > 0) wsPayload.attachments = readyAttachments;
+
+    wsRef.current.send(JSON.stringify(wsPayload));
     setInput("");
     setReplyTo(null);
+    setPendingAttachments([]);
     inputRef.current?.focus();
   }
 
@@ -370,7 +681,14 @@ export default function ConversationPage() {
               <>
                 <div onClick={() => setMenuOpen(false)} className="fixed inset-0 z-[199]" />
                 <div className="absolute right-0 top-[calc(100%+4px)] bg-white border border-border rounded-xl shadow-lg min-w-[160px] z-[200] overflow-hidden">
-                  <button onClick={handleDeleteConversation} className="flex items-center gap-2 w-full text-left px-4 py-2.5 text-sm text-destructive hover:bg-destructive/5 transition-colors">
+                  <button
+                    onClick={() => { setMenuOpen(false); setMediaOpen(true); }}
+                    className="flex items-center gap-2 w-full text-left px-4 py-2.5 text-sm text-foreground hover:bg-muted transition-colors"
+                  >
+                    <GalleryHorizontalEnd className="w-3.5 h-3.5" />
+                    Media
+                  </button>
+                  <button onClick={handleDeleteConversation} className="flex items-center gap-2 w-full text-left px-4 py-2.5 text-sm text-destructive hover:bg-destructive/5 transition-colors border-t border-border">
                     <Trash2 className="w-3.5 h-3.5" />
                     Delete chat
                   </button>
@@ -399,6 +717,7 @@ export default function ConversationPage() {
             onHoverLeave={() => setHoveredMsgId(null)}
             onSwipe={(m) => { setHoveredMsgId(null); setReplyTo(m); setTimeout(() => inputRef.current?.focus(), 50); }}
             onScrollToQuote={scrollToQuote}
+            onPreviewImage={(urls, idx) => setLightbox({ urls, index: idx })}
             msgRef={(el) => {
               if (el) msgRefs.current.set(msg.id, el);
               else msgRefs.current.delete(msg.id);
@@ -422,8 +741,101 @@ export default function ConversationPage() {
         </div>
       )}
 
+      {/* Pending attachments preview */}
+      {pendingAttachments.length > 0 && (
+        <div className="flex items-center gap-2 px-4 py-2 border-t border-border bg-white flex-shrink-0 flex-wrap">
+          {pendingAttachments.map((p) => (
+            <div key={p.uid} className="relative flex-shrink-0">
+              {p.localUrl ? (
+                <img
+                  src={p.localUrl}
+                  alt={p.name}
+                  onClick={() => !p.uploading && setLightbox({ urls: [p.localUrl!], index: 0 })}
+                  className="w-14 h-14 rounded-lg object-cover border border-border cursor-zoom-in"
+                />
+              ) : (
+                <div className="flex items-center gap-1.5 bg-muted rounded-lg px-2.5 py-1.5 text-xs max-w-[140px]">
+                  <FileText className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground" />
+                  <span className="truncate text-foreground">{p.name}</span>
+                </div>
+              )}
+              {p.uploading && (
+                <div className="absolute inset-0 rounded-lg bg-black/40 flex items-center justify-center">
+                  <span className="text-[10px] text-white">…</span>
+                </div>
+              )}
+              {p.error && (
+                <div className="absolute inset-0 rounded-lg bg-destructive/30 flex items-center justify-center">
+                  <span className="text-[10px] text-destructive font-semibold">!</span>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => removePending(p.uid)}
+                className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-foreground text-background flex items-center justify-center"
+              >
+                <X className="w-2.5 h-2.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Input */}
-      <form onSubmit={handleSubmit} className="flex items-end gap-2 px-4 py-3 border-t border-border bg-white flex-shrink-0">
+      <form onSubmit={handleSubmit} className="flex items-end gap-2 px-3 py-3 border-t border-border bg-white flex-shrink-0">
+        {/* Hidden file inputs */}
+        <input
+          ref={photoInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/gif,image/webp"
+          multiple
+          className="hidden"
+          onChange={(e) => handleMediaSelect(e, "/api/upload")}
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,.txt,.md,.csv,.py,.js,.ts,.jsx,.tsx,.java,.c,.cpp,.h,.cs,.go,.rs,.rb,.php,.json,.yaml,.yml,.toml,.xml,.sh,.sql,.r,.ipynb"
+          multiple
+          className="hidden"
+          onChange={(e) => handleMediaSelect(e, "/api/upload/file")}
+        />
+
+        {/* + button with attach menu */}
+        <div className="relative flex-shrink-0 mb-0.5">
+          <button
+            type="button"
+            onClick={() => setAttachMenuOpen((o) => !o)}
+            disabled={status !== "connected" || pendingAttachments.length >= 5}
+            className="w-10 h-10 rounded-full border border-input bg-background flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors disabled:opacity-40"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+          {attachMenuOpen && (
+            <>
+              <div onClick={() => setAttachMenuOpen(false)} className="fixed inset-0 z-[198]" />
+              <div className="absolute bottom-[calc(100%+6px)] left-0 bg-white border border-border rounded-xl shadow-lg z-[199] overflow-hidden min-w-[140px]">
+                <button
+                  type="button"
+                  onClick={() => photoInputRef.current?.click()}
+                  className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-foreground hover:bg-muted transition-colors"
+                >
+                  <ImageIcon className="w-4 h-4 text-blue-500" />
+                  Photo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-foreground hover:bg-muted transition-colors border-t border-border"
+                >
+                  <FileText className="w-4 h-4 text-orange-500" />
+                  File
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+
         <textarea
           ref={inputRef}
           value={input}
@@ -438,12 +850,59 @@ export default function ConversationPage() {
         />
         <button
           type="submit"
-          disabled={!input.trim() || status !== "connected"}
+          disabled={
+            status !== "connected" ||
+            pendingAttachments.some((a) => a.uploading) ||
+            (!input.trim() && !pendingAttachments.some((a) => a.attachment))
+          }
           className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center flex-shrink-0 disabled:opacity-40 hover:bg-primary/90 transition-colors mb-0.5"
         >
           <Send className="w-4 h-4" />
         </button>
       </form>
+
+      {/* Media sheet */}
+      {mediaOpen && (() => {
+        const allAttachments = messages.flatMap((m) => m.attachments ?? []);
+        const photos = allAttachments.filter((a) => a.mime_type.startsWith("image/"));
+        const docs = allAttachments.filter((a) => !a.mime_type.startsWith("image/"));
+        const isPdf = (a: FileAttachment) => a.mime_type === "application/pdf";
+        const isText = (a: FileAttachment) => a.mime_type === "text/plain";
+        return (
+          <>
+            <div onClick={() => setMediaOpen(false)} className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100]" />
+            <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-[600px] bg-white rounded-2xl z-[101] shadow-2xl max-h-[70vh] flex flex-col">
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
+                <span className="font-semibold text-sm">Media &amp; Files</span>
+                <button onClick={() => setMediaOpen(false)} className="rounded-full p-1 hover:bg-muted text-muted-foreground transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Tabs */}
+              <MediaSheet
+                photos={photos}
+                docs={docs}
+                isPdf={isPdf}
+                isText={isText}
+                onPreview={(urls, idx) => setLightbox({ urls, index: idx })}
+              />
+            </div>
+          </>
+        );
+      })()}
+
+      {/* Image lightbox portal */}
+      {lightbox && createPortal(
+        <LightboxPortal
+          urls={lightbox.urls}
+          index={lightbox.index}
+          onChange={(idx) => setLightbox((l) => l ? { ...l, index: idx } : null)}
+          onClose={() => setLightbox(null)}
+        />,
+        document.body
+      )}
     </main>
   );
 }

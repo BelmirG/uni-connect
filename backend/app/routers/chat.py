@@ -18,6 +18,20 @@ from app.models.user import User
 router = APIRouter(prefix="/api/clubs", tags=["chat"])
 
 
+def _build_chat_payload(msg: ChatMessage, author: User) -> dict:
+    return {
+        "id": str(msg.id),
+        "content": msg.content,
+        "attachments": msg.attachments or [],
+        "author": {
+            "username": author.username,
+            "display_name": author.display_name,
+            "avatar_url": author.avatar_url,
+        },
+        "created_at": msg.created_at.isoformat(),
+    }
+
+
 # ── REST: load recent message history ─────────────────────────────────────────
 
 @router.get("/{slug}/chat")
@@ -40,45 +54,20 @@ async def get_chat_history(
         raise HTTPException(status_code=403, detail="You must be a member to access club chat.")
 
     rows = (await db.execute(
-        select(ChatMessage, User.username, User.display_name)
+        select(ChatMessage, User)
         .join(User, ChatMessage.author_id == User.id)
         .where(ChatMessage.club_id == club.id, ChatMessage.is_deleted == False)
         .order_by(ChatMessage.created_at.desc())
         .limit(limit)
     )).all()
 
-    # Reverse so messages are oldest-first in the response
-    return list(reversed([
-        {
-            "id": str(row[0].id),
-            "content": row[0].content,
-            "author": {"username": row[1], "display_name": row[2]},
-            "created_at": row[0].created_at.isoformat(),
-        }
-        for row in rows
-    ]))
+    return list(reversed([_build_chat_payload(row[0], row[1]) for row in rows]))
 
 
 # ── WebSocket: real-time chat ──────────────────────────────────────────────────
 
 @router.websocket("/{slug}/chat/ws")
 async def chat_websocket(websocket: WebSocket, slug: str):
-    """
-    Authentication: the browser sends the same httpOnly JWT cookie it uses for
-    all HTTP requests — same-origin WebSocket upgrades include cookies automatically.
-
-    Architecture:
-      Each connected client runs two concurrent tasks:
-        1. redis_to_ws  — listens on the Redis pub/sub channel and forwards
-                          every published message to this WebSocket client.
-        2. ws_to_redis  — reads messages from this WebSocket client, persists
-                          them to PostgreSQL, then publishes to the Redis channel
-                          so ALL connected clients (including this one) receive it.
-
-      Using Redis as the broadcast bus means the design scales to multiple
-      server processes — every process that has a subscriber on the channel
-      receives the message regardless of which process a client is connected to.
-    """
     token = websocket.cookies.get("access_token")
     if not token:
         await websocket.close(code=4001, reason="Not authenticated")
@@ -132,24 +121,41 @@ async def chat_websocket(websocket: WebSocket, slug: str):
                 except (WebSocketDisconnect, Exception):
                     return
 
-                content = text.strip()
-                if not content or len(content) > 2000:
+                try:
+                    data = json.loads(text)
+                except json.JSONDecodeError:
                     continue
 
-                chat_msg = ChatMessage(club_id=club.id, author_id=user.id, content=content)
+                content = (data.get("content") or "").strip()
+                raw_attachments = data.get("attachments") or []
+                attachments = [
+                    {
+                        "url": str(a.get("url", "")),
+                        "name": str(a.get("name", ""))[:255],
+                        "size": int(a.get("size", 0)),
+                        "mime_type": str(a.get("mime_type", "")),
+                    }
+                    for a in raw_attachments
+                    if isinstance(a, dict) and a.get("url")
+                ][:5]
+
+                if not content and not attachments:
+                    continue
+
+                if content and len(content) > 2000:
+                    content = content[:2000]
+
+                chat_msg = ChatMessage(
+                    club_id=club.id,
+                    author_id=user.id,
+                    content=content or None,
+                    attachments=attachments,
+                )
                 db.add(chat_msg)
                 await db.commit()
                 await db.refresh(chat_msg)
 
-                payload = json.dumps({
-                    "id": str(chat_msg.id),
-                    "content": chat_msg.content,
-                    "author": {
-                        "username": user.username,
-                        "display_name": user.display_name,
-                    },
-                    "created_at": chat_msg.created_at.isoformat(),
-                })
+                payload = json.dumps(_build_chat_payload(chat_msg, user))
                 await redis.publish(channel, payload)
 
         redis_task = asyncio.create_task(redis_to_ws())
