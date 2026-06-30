@@ -22,13 +22,12 @@ interface Props {
   maxFiles?: number;
 }
 
+// Old binary Office formats (.doc, .xls, .ppt) support VBA macros — excluded.
+// Only accept Open XML formats (macro-free) and PDF.
 const ACCEPT = [
   "application/pdf",
-  "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-excel",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-powerpoint",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ].join(",");
 
