@@ -13,6 +13,8 @@ import {
   PenLine,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import { InlineComposer } from "@/components/InlineComposer";
+import { SkeletonPostList } from "@/components/Skeleton";
 import UserSearchInput from "@/components/UserSearchInput";
 import { ImageUploader } from "@/components/ImageUploader";
 import { ImageGrid } from "@/components/ImageGrid";
@@ -318,17 +320,17 @@ export default function FeedPage() {
 
   const pillCls = (active: boolean) =>
     cn(
-      "text-xs font-medium px-3 py-1 rounded-full border transition-colors",
+      "text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap",
       active
-        ? "bg-primary text-primary-foreground border-primary"
-        : "border-border text-muted-foreground hover:border-foreground hover:text-foreground bg-background"
+        ? "bg-primary/10 text-primary border-primary/20"
+        : "bg-surface border-outline-variant text-on-surface-variant hover:bg-surface-container"
     );
 
   return (
     <>
-      <main className="max-w-xl mx-auto px-4 pt-4 pb-36">
+      <main className="max-w-xl mx-auto px-4 pt-4 pb-8">
         {/* Tabs */}
-        <div className="flex border-b border-border mb-4">
+        <div className="flex border-b border-outline-variant mb-4">
           {(["discover", "friends"] as const).map((tab) => (
             <button
               key={tab}
@@ -336,8 +338,8 @@ export default function FeedPage() {
               className={cn(
                 "flex-1 py-3 text-sm font-medium transition-colors",
                 feedTab === tab
-                  ? "text-primary border-b-2 border-primary -mb-px"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "text-on-surface border-b-2 border-on-surface -mb-px"
+                  : "text-on-surface-variant hover:text-on-surface"
               )}
             >
               {tab === "discover" ? "Discover" : "Friends"}
@@ -345,20 +347,15 @@ export default function FeedPage() {
           ))}
         </div>
 
-        {/* Sort pills — Discover only */}
-        {feedTab === "discover" && (
-          <div className="flex gap-2 mb-3">
-            <button onClick={() => setSort("hot")} className={pillCls(sort === "hot")}>
-              Hot
-            </button>
-            <button onClick={() => setSort("new")} className={pillCls(sort === "new")}>
-              New
-            </button>
-          </div>
-        )}
-
-        {/* Faculty filter pills */}
-        <div className="flex gap-1.5 mb-4 flex-wrap">
+        {/* Sort + faculty filter chips — horizontal scroll */}
+        <div className="flex overflow-x-auto gap-2 mb-4 no-scrollbar pb-1 -mx-4 px-4">
+          {feedTab === "discover" && (
+            <>
+              <button onClick={() => setSort("hot")} className={pillCls(sort === "hot")}>Hot</button>
+              <button onClick={() => setSort("new")} className={pillCls(sort === "new")}>New</button>
+              <span className="w-px h-6 self-center bg-outline-variant flex-shrink-0" />
+            </>
+          )}
           <button onClick={() => setFacultyFilter(null)} className={pillCls(facultyFilter === null)}>
             All
           </button>
@@ -373,17 +370,68 @@ export default function FeedPage() {
           ))}
         </div>
 
+        {/* Inline expanding composer */}
+        <InlineComposer
+          open={composerOpen}
+          onOpen={() => setComposerOpen(true)}
+          icon={<PenLine className="w-4 h-4" />}
+          placeholder="What's on your mind?"
+          className="mb-4"
+        >
+          <form onSubmit={handlePost} className="px-4 pt-3 pb-3 space-y-3">
+            <textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              placeholder="What's on your mind?"
+              rows={4}
+              className="w-full resize-none text-sm bg-transparent focus:outline-none text-on-surface placeholder:text-on-surface-variant/60"
+            />
+            <div className="border-t border-outline-variant/40 pt-2 space-y-3">
+              <ImageUploader
+                key={uploaderKey}
+                onUrlsChange={(urls, uploading) => { setImageUrls(urls); setImagesUploading(uploading); }}
+              />
+              <FileUploader
+                key={uploaderKey + 1000}
+                onChange={(attachments, uploading) => { setFileAttachments(attachments); setFilesUploading(uploading); }}
+              />
+              <PollComposer value={pollDraft} onChange={setPollDraft} />
+              <div className="flex items-center gap-2 flex-wrap">
+                <select
+                  value={postFacultyTag}
+                  onChange={(e) => setPostFacultyTag(e.target.value as Faculty | "")}
+                  className="text-xs border border-input rounded-md px-2.5 py-1.5 bg-background text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">Tag faculty (optional)</option>
+                  {FACULTIES.map((f) => (
+                    <option key={f} value={f}>{f} — {FACULTY_NAMES[f]}</option>
+                  ))}
+                </select>
+                {postError && <p className="text-xs text-destructive">{postError}</p>}
+                <div className="ml-auto flex items-center gap-2">
+                  <button type="button" onClick={closeComposer} className="text-xs text-on-surface-variant hover:text-on-surface transition-colors px-2 py-1">Cancel</button>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={submitting || imagesUploading || filesUploading || (!content.trim() && !imageUrls.length && !pollDraft && !fileAttachments.length)}
+                  >
+                    {imagesUploading || filesUploading ? "Uploading…" : submitting ? "Posting…" : "Post"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </form>
+        </InlineComposer>
+
         {/* People search — Friends tab */}
         {feedTab === "friends" && (
           <PeopleSearch onFollowChange={() => setFeedRefreshKey((k) => k + 1)} />
         )}
 
         {/* Post list */}
-        {loading && (
-          <p className="text-muted-foreground text-sm text-center py-8">Loading…</p>
-        )}
+        {loading && <SkeletonPostList />}
         {!loading && posts.length === 0 && (
-          <p className="text-muted-foreground text-sm text-center py-8">
+          <p className="text-on-surface-variant text-sm text-center py-8">
             {feedTab === "friends"
               ? "No posts from people you follow yet. Follow someone above to see their posts here."
               : facultyFilter
@@ -392,7 +440,7 @@ export default function FeedPage() {
           </p>
         )}
 
-        <div className="space-y-3">
+        <div className="space-y-3 mt-1">
           {posts.map((post) => (
             <PostCard
               key={post.id}
@@ -417,96 +465,7 @@ export default function FeedPage() {
         )}
       </main>
 
-      {/* Fixed compose bar */}
-      <div className="fixed bottom-16 left-0 right-0 px-4 py-2 bg-white/95 backdrop-blur-sm border-t border-border z-40">
-        <div className="max-w-xl mx-auto">
-          <button
-            onClick={() => setComposerOpen(true)}
-            className="w-full flex items-center gap-3 px-4 py-2.5 rounded-full bg-muted hover:bg-muted/80 transition-colors text-sm text-muted-foreground"
-          >
-            <PenLine className="w-4 h-4 flex-shrink-0" />
-            What&apos;s on your mind?
-          </button>
-        </div>
-      </div>
 
-      {/* Compose sheet */}
-      {composerOpen && (
-        <>
-          <div
-            onClick={closeComposer}
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100]"
-          />
-          <div className="fixed bottom-[4.5rem] left-1/2 -translate-x-1/2 w-[min(600px,94vw)] bg-white rounded-2xl z-[101] shadow-2xl max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
-              <span className="font-semibold text-sm">Create post</span>
-              <button
-                onClick={closeComposer}
-                className="rounded-full p-1 hover:bg-muted text-muted-foreground transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="overflow-y-auto flex-1">
-              <form onSubmit={handlePost} className="px-4 py-3 space-y-3">
-                <textarea
-                  autoFocus
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  placeholder="What's on your mind?"
-                  rows={4}
-                  className="w-full resize-none text-sm placeholder:text-muted-foreground border-0 outline-none focus:ring-0 bg-transparent min-h-[90px]"
-                />
-                <div className="border-t border-border pt-3 space-y-3">
-                  <ImageUploader
-                    key={uploaderKey}
-                    onUrlsChange={(urls, uploading) => {
-                      setImageUrls(urls);
-                      setImagesUploading(uploading);
-                    }}
-                  />
-                  <FileUploader
-                    key={uploaderKey + 1000}
-                    onChange={(attachments, uploading) => {
-                      setFileAttachments(attachments);
-                      setFilesUploading(uploading);
-                    }}
-                  />
-                  <PollComposer value={pollDraft} onChange={setPollDraft} />
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <select
-                      value={postFacultyTag}
-                      onChange={(e) => setPostFacultyTag(e.target.value as Faculty | "")}
-                      className="text-xs border border-input rounded-md px-2.5 py-1.5 bg-background text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                    >
-                      <option value="">Tag faculty (optional)</option>
-                      {FACULTIES.map((f) => (
-                        <option key={f} value={f}>
-                          {f} — {FACULTY_NAMES[f]}
-                        </option>
-                      ))}
-                    </select>
-                    {postError && <p className="text-xs text-destructive">{postError}</p>}
-                    <Button
-                      type="submit"
-                      size="sm"
-                      className="ml-auto"
-                      disabled={
-                        submitting ||
-                        imagesUploading ||
-                        filesUploading ||
-                        (!content.trim() && !imageUrls.length && !pollDraft && !fileAttachments.length)
-                      }
-                    >
-                      {imagesUploading || filesUploading ? "Uploading…" : submitting ? "Posting…" : "Post"}
-                    </Button>
-                  </div>
-                </div>
-              </form>
-            </div>
-          </div>
-        </>
-      )}
     </>
   );
 }
@@ -550,7 +509,7 @@ function SharePanel({ postId, shareCount }: { postId: string; shareCount: number
     <>
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors"
       >
         <Share2 className="w-4 h-4" />
         {shareCount > 0 && <span>{shareCount}</span>}
@@ -621,9 +580,9 @@ function PostCard({
   const isOwn = currentUsername !== null && post.author?.username === currentUsername;
 
   return (
-    <div className="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
+    <div className="bg-surface rounded-xl border border-outline-variant overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 pt-4 pb-3">
+      <div className="flex items-start gap-3 px-4 pt-4 pb-3">
         <Link href={`/profile/${post.author?.username}`} className="flex-shrink-0">
           <MiniAvatar
             name={post.author?.display_name ?? "?"}
@@ -632,26 +591,23 @@ function PostCard({
           />
         </Link>
         <div className="flex-1 min-w-0">
-          <Link href={`/profile/${post.author?.username}`} className="no-underline hover:underline">
-            <span className="font-semibold text-sm text-foreground">
+          <Link href={`/profile/${post.author?.username}`} className="no-underline">
+            <span className="font-semibold text-sm text-on-surface leading-tight">
               {post.author?.display_name ?? "Unknown"}
-            </span>{" "}
-            <span className="text-muted-foreground text-xs">
-              @{post.author?.username ?? "?"}
             </span>
           </Link>
-          <span className="text-muted-foreground text-xs"> · {timeAgo(post.created_at)}</span>
+          <p className="text-[11px] text-on-surface-variant mt-0.5">
+            {timeAgo(post.created_at)}
+            {post.faculty_tag && (
+              <span> · {post.faculty_tag}</span>
+            )}
+          </p>
         </div>
-        {post.faculty_tag && (
-          <span className="text-[11px] font-semibold tracking-wide px-2 py-0.5 rounded-full bg-muted text-muted-foreground flex-shrink-0">
-            {post.faculty_tag}
-          </span>
-        )}
       </div>
 
       {/* Content */}
       {post.content && (
-        <p className="px-4 pb-3 text-sm leading-relaxed whitespace-pre-wrap text-foreground">
+        <p className="px-4 pb-3 text-body-sm leading-relaxed whitespace-pre-wrap text-on-surface">
           {post.content}
         </p>
       )}
@@ -682,43 +638,49 @@ function PostCard({
       )}
 
       {/* Action bar */}
-      <div className="flex items-center px-2 py-1 border-t border-border/60">
-        <button
-          onClick={() => onVote(post.id, "up")}
-          className={cn(
-            "flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors",
-            voted === "up"
-              ? "text-orange-500"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted"
-          )}
-        >
-          <ChevronUp className="w-4 h-4" />
-          {post.upvotes}
-        </button>
-        <button
-          onClick={() => onVote(post.id, "down")}
-          className={cn(
-            "flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors",
-            voted === "down"
-              ? "text-indigo-500"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted"
-          )}
-        >
-          <ChevronDown className="w-4 h-4" />
-          {post.downvotes}
-        </button>
+      <div className="flex items-center gap-1 px-3 py-2 border-t border-surface-variant">
+        {/* Vote pill */}
+        <div className="flex items-center bg-surface-container-low rounded-lg border border-outline-variant overflow-hidden">
+          <button
+            onClick={() => onVote(post.id, "up")}
+            className={cn(
+              "flex items-center gap-1 px-2 py-1.5 text-xs font-semibold transition-colors",
+              voted === "up" ? "text-blue-500" : "text-on-surface-variant hover:text-blue-500"
+            )}
+          >
+            <ChevronUp className="w-3.5 h-3.5" />
+            <span className="tabular-nums">{post.upvotes}</span>
+          </button>
+          <span className="w-px h-4 bg-outline-variant flex-shrink-0" />
+          <button
+            onClick={() => onVote(post.id, "down")}
+            className={cn(
+              "flex items-center gap-1 px-2 py-1.5 text-xs font-semibold transition-colors",
+              voted === "down" ? "text-yellow-500" : "text-on-surface-variant hover:text-yellow-500"
+            )}
+          >
+            <ChevronDown className="w-3.5 h-3.5" />
+            <span className="tabular-nums">{post.downvotes}</span>
+          </button>
+        </div>
+
+        {/* Replies */}
         <Link
           href={`/feed/${post.id}`}
-          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors no-underline"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors no-underline"
         >
           <MessageCircle className="w-4 h-4" />
           {post.reply_count}
         </Link>
+
+        {/* Share */}
         <SharePanel postId={post.id} shareCount={post.share_count} />
+
+        {/* Delete (own posts) */}
         {isOwn && (
           <button
             onClick={() => onDelete(post.id)}
-            className="ml-auto flex items-center px-2.5 py-1.5 rounded-lg text-muted-foreground/40 hover:text-destructive hover:bg-destructive/5 transition-colors"
+            className="ml-auto flex items-center px-2 py-1.5 rounded-lg text-on-surface-variant/40 hover:text-error hover:bg-error-container/30 transition-colors"
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>

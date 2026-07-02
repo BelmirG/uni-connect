@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { SkeletonRowList } from "@/components/Skeleton";
 import { cn } from "@/lib/utils";
 import { Plus, X, Lock, Users, ChevronRight } from "lucide-react";
 
@@ -119,7 +120,7 @@ export default function ClubsPage() {
       <main className="max-w-xl mx-auto px-4 pt-4 pb-36">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-xl font-bold text-foreground">Clubs</h1>
+          <h1 className="text-xl font-bold text-on-surface">Clubs</h1>
           <button
             onClick={() => setShowForm(true)}
             className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
@@ -130,16 +131,16 @@ export default function ClubsPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 p-1 bg-muted rounded-xl mb-4">
+        <div className="flex border-b border-outline-variant mb-4">
           {(["my", "discover"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
               className={cn(
-                "flex-1 text-sm font-semibold py-1.5 rounded-lg transition-colors",
+                "flex-1 py-3 text-sm font-medium transition-colors",
                 tab === t
-                  ? "bg-white text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "text-on-surface border-b-2 border-on-surface -mb-px"
+                  : "text-on-surface-variant hover:text-on-surface"
               )}
             >
               {t === "my" ? "My Clubs" : "Discover"}
@@ -160,8 +161,8 @@ export default function ClubsPage() {
                   className="bg-primary/5 border border-primary/15 rounded-xl px-4 py-3 flex items-center justify-between gap-3"
                 >
                   <div className="min-w-0">
-                    <span className="font-semibold text-sm text-foreground">{inv.club_name}</span>
-                    <span className="text-xs text-muted-foreground">
+                    <span className="font-semibold text-sm text-on-surface">{inv.club_name}</span>
+                    <span className="text-xs text-on-surface-variant">
                       {" · "}invited by {inv.invited_by_display_name}
                     </span>
                   </div>
@@ -180,7 +181,7 @@ export default function ClubsPage() {
         )}
 
         {/* List */}
-        {loading && <p className="text-muted-foreground text-sm text-center py-8">Loading…</p>}
+        {loading && <SkeletonRowList />}
         {!loading && tab === "my" && clubs.filter((c) => c.is_member).length === 0 && (
           <p className="text-muted-foreground text-sm text-center py-8">
             You haven&apos;t joined any clubs yet.{" "}
@@ -197,12 +198,12 @@ export default function ClubsPage() {
 
         <div className="space-y-3">
           {clubs.filter((c) => tab === "my" ? c.is_member : !c.is_member).map((club) => (
-            <div key={club.id} className="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
+            <div key={club.id} className="bg-surface rounded-xl border border-outline-variant overflow-hidden">
               <Link href={`/clubs/${club.slug}`} className="block px-4 pt-4 pb-3 no-underline">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                      <span className="font-semibold text-sm text-foreground">{club.name}</span>
+                      <span className="font-semibold text-sm text-on-surface">{club.name}</span>
                       {club.is_private && (
                         <span className="flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                           <Lock className="w-2.5 h-2.5" />
@@ -224,12 +225,12 @@ export default function ClubsPage() {
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-1 text-xs text-on-surface-variant">
                       <Users className="w-3 h-3" />
                       {club.member_count} {club.member_count === 1 ? "member" : "members"}
                     </div>
                     {club.description && (
-                      <p className="text-xs text-muted-foreground mt-1.5 line-clamp-2">
+                      <p className="text-xs text-on-surface-variant mt-1.5 line-clamp-2">
                         {club.description}
                       </p>
                     )}
@@ -238,7 +239,7 @@ export default function ClubsPage() {
                 </div>
               </Link>
 
-              <div className="flex items-center justify-end px-4 py-2 border-t border-border/60">
+              <div className="flex items-center justify-end px-4 py-2 border-t border-outline-variant/60">
                 {!club.is_member && !club.has_pending_request && (
                   <Button
                     size="sm"
@@ -254,7 +255,7 @@ export default function ClubsPage() {
                   </Button>
                 )}
                 {club.has_pending_request && (
-                  <span className="text-xs text-muted-foreground">Request pending…</span>
+                  <span className="text-xs text-on-surface-variant">Request pending…</span>
                 )}
                 {club.is_member && club.role === "owner" && (
                   <span className="text-xs font-semibold text-purple-600">You own this club</span>

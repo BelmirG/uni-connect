@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import { apiFetch, ApiError } from "@/lib/api";
+import { InlineComposer } from "@/components/InlineComposer";
 import { ImageUploader } from "@/components/ImageUploader";
 import { ImageGrid } from "@/components/ImageGrid";
 import { FileUploader, FileAttachment } from "@/components/FileUploader";
@@ -27,6 +29,7 @@ import {
   UserPlus,
   Pin,
   MessageSquare,
+  PenLine,
 } from "lucide-react";
 
 interface Club {
@@ -429,12 +432,12 @@ export default function ClubDetailPage() {
         </div>
 
         {/* Club header card */}
-        <div className="bg-white border border-border rounded-xl shadow-sm mb-4">
+        <div className="bg-surface rounded-xl border border-outline-variant mb-4">
           <div className="px-4 pt-4 pb-3">
             <div className="flex items-start justify-between gap-3">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap mb-0.5">
-                  <h1 className="text-lg font-bold text-foreground">{club.name}</h1>
+                  <h1 className="text-lg font-bold text-on-surface">{club.name}</h1>
                   {club.is_private && (
                     <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                       Private
@@ -455,12 +458,12 @@ export default function ClubDetailPage() {
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <div className="flex items-center gap-1 text-xs text-on-surface-variant">
                   <Users className="w-3 h-3" />
                   {club.member_count} {club.member_count === 1 ? "member" : "members"}
                 </div>
                 {club.description && (
-                  <p className="text-sm text-muted-foreground mt-1.5">{club.description}</p>
+                  <p className="text-sm text-on-surface-variant mt-1.5">{club.description}</p>
                 )}
               </div>
 
@@ -555,8 +558,8 @@ export default function ClubDetailPage() {
 
           {/* Join requests */}
           {showRequests && (
-            <div className="border-t border-border/60 px-4 py-3">
-              <p className="text-xs font-semibold text-muted-foreground mb-2">Pending join requests</p>
+            <div className="border-t border-outline-variant/60 px-4 py-3">
+              <p className="text-xs font-semibold text-on-surface-variant mb-2">Pending join requests</p>
               {joinRequests.length === 0 ? (
                 <p className="text-xs text-muted-foreground">No pending requests.</p>
               ) : (
@@ -581,12 +584,58 @@ export default function ClubDetailPage() {
         </div>
 
         {!club.is_member && (
-          <p className="text-muted-foreground text-sm mb-4">Join this club to post here.</p>
+          <p className="text-on-surface-variant text-sm mb-4">Join this club to post here.</p>
+        )}
+
+        {/* Inline expanding composer */}
+        {club.is_member && (
+          <InlineComposer
+            open={composerOpen}
+            onOpen={() => setComposerOpen(true)}
+            icon={<PenLine className="w-4 h-4" />}
+            placeholder={`Post in ${club.name}…`}
+            className="mb-4"
+          >
+            <form onSubmit={handlePost} className="px-4 pt-3 pb-3 space-y-3">
+              <textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); (e.currentTarget.closest("form") as HTMLFormElement)?.requestSubmit(); } }}
+                placeholder={`Post in ${club.name}…`}
+                rows={4}
+                className="w-full resize-none text-sm bg-transparent focus:outline-none text-on-surface placeholder:text-on-surface-variant/60"
+              />
+              <div className="border-t border-outline-variant/40 pt-2 space-y-3">
+                <ImageUploader
+                  key={uploaderKey}
+                  onUrlsChange={(urls, uploading) => { setImageUrls(urls); setImagesUploading(uploading); }}
+                />
+                <FileUploader
+                  key={uploaderKey + 1000}
+                  onChange={(attachments, uploading) => { setFileAttachments(attachments); setFilesUploading(uploading); }}
+                />
+                <PollComposer value={pollDraft} onChange={setPollDraft} />
+                <div className="flex items-center gap-2">
+                  {postError && <p className="text-xs text-destructive">{postError}</p>}
+                  <div className="ml-auto flex items-center gap-2">
+                    <button type="button" onClick={() => { setComposerOpen(false); setPollDraft(null); }} className="text-xs text-on-surface-variant hover:text-on-surface transition-colors px-2 py-1">Cancel</button>
+                    <Button
+                      type="submit"
+                      size="sm"
+                      disabled={submitting || imagesUploading || filesUploading || (!content.trim() && !imageUrls.length && !pollDraft && !fileAttachments.length)}
+                    >
+                      {imagesUploading || filesUploading ? "Uploading…" : submitting ? "Posting…" : "Post"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </InlineComposer>
         )}
 
         {/* Posts */}
         {posts.length === 0 && (
-          <p className="text-muted-foreground text-sm text-center py-8">No posts yet. Be the first!</p>
+          <p className="text-on-surface-variant text-sm text-center py-8">No posts yet. Be the first!</p>
         )}
 
         <div className="space-y-3">
@@ -596,8 +645,8 @@ export default function ClubDetailPage() {
               <div
                 key={post.id}
                 className={cn(
-                  "bg-white border rounded-xl shadow-sm overflow-hidden",
-                  post.is_pinned ? "border-purple-200" : "border-border"
+                  "bg-surface rounded-xl border overflow-hidden",
+                  post.is_pinned ? "border-purple-200" : "border-outline-variant"
                 )}
               >
                 {post.is_pinned && (
@@ -616,13 +665,13 @@ export default function ClubDetailPage() {
                   ) : (
                     <MiniAvatar name="?" url={null} />
                   )}
-                  <div className="text-xs text-muted-foreground min-w-0">
+                  <div className="text-xs text-on-surface-variant min-w-0">
                     {post.author ? (
                       <Link
                         href={`/profile/${post.author.username}`}
-                        className="no-underline text-muted-foreground"
+                        className="no-underline text-on-surface-variant"
                       >
-                        <strong className="text-foreground">{post.author.display_name}</strong>
+                        <strong className="text-on-surface">{post.author.display_name}</strong>
                         {" @"}{post.author.username}
                       </Link>
                     ) : (
@@ -648,7 +697,7 @@ export default function ClubDetailPage() {
 
                 {/* Content */}
                 {post.content && (
-                  <p className="px-4 pb-3 text-sm leading-relaxed whitespace-pre-wrap text-foreground">
+                  <p className="px-4 pb-3 text-body-sm leading-relaxed whitespace-pre-wrap text-on-surface">
                     {post.content}
                   </p>
                 )}
@@ -667,34 +716,36 @@ export default function ClubDetailPage() {
                 )}
 
                 {/* Action bar */}
-                <div className="flex items-center px-2 py-1 border-t border-border/60">
-                  <button
-                    onClick={() => handleVote(post.id, "up")}
-                    className={cn(
-                      "flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors",
-                      voted === "up"
-                        ? "text-orange-500"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                    )}
-                  >
-                    <ChevronUp className="w-4 h-4" />
-                    {post.upvotes}
-                  </button>
-                  <button
-                    onClick={() => handleVote(post.id, "down")}
-                    className={cn(
-                      "flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors",
-                      voted === "down"
-                        ? "text-indigo-500"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                    )}
-                  >
-                    <ChevronDown className="w-4 h-4" />
-                    {post.downvotes}
-                  </button>
+                <div className="flex items-center gap-1 px-3 py-2 border-t border-surface-variant">
+                  {/* Vote pill */}
+                  <div className="flex items-center bg-surface-container-low rounded-lg border border-outline-variant overflow-hidden">
+                    <button
+                      onClick={() => handleVote(post.id, "up")}
+                      className={cn(
+                        "flex items-center gap-1 px-2 py-1.5 text-xs font-semibold transition-colors",
+                        voted === "up" ? "text-blue-500" : "text-on-surface-variant hover:text-blue-500"
+                      )}
+                    >
+                      <ChevronUp className="w-3.5 h-3.5" />
+                      <span className="tabular-nums">{post.upvotes}</span>
+                    </button>
+                    <span className="w-px h-4 bg-outline-variant flex-shrink-0" />
+                    <button
+                      onClick={() => handleVote(post.id, "down")}
+                      className={cn(
+                        "flex items-center gap-1 px-2 py-1.5 text-xs font-semibold transition-colors",
+                        voted === "down" ? "text-yellow-500" : "text-on-surface-variant hover:text-yellow-500"
+                      )}
+                    >
+                      <ChevronDown className="w-3.5 h-3.5" />
+                      <span className="tabular-nums">{post.downvotes}</span>
+                    </button>
+                  </div>
+
+                  {/* Replies */}
                   <Link
                     href={`/feed/${post.id}`}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors no-underline"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors no-underline"
                   >
                     <MessageCircle className="w-4 h-4" />
                     {post.reply_count} {post.reply_count === 1 ? "reply" : "replies"}
@@ -713,7 +764,7 @@ export default function ClubDetailPage() {
                       ) : (
                         <button
                           onClick={() => handlePinPost(post.id)}
-                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted transition-colors"
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-on-surface-variant/40 hover:text-on-surface-variant hover:bg-surface-container transition-colors"
                         >
                           <Pin className="w-3.5 h-3.5" />
                         </button>
@@ -722,7 +773,7 @@ export default function ClubDetailPage() {
                     {(post.author?.username === currentUsername || club.role === "owner") && (
                       <button
                         onClick={() => handleDeletePost(post.id)}
-                        className="flex items-center px-2.5 py-1.5 rounded-lg text-muted-foreground/40 hover:text-destructive hover:bg-destructive/5 transition-colors"
+                        className="flex items-center px-2 py-1.5 rounded-lg text-on-surface-variant/40 hover:text-error hover:bg-error-container/30 transition-colors"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -736,91 +787,16 @@ export default function ClubDetailPage() {
 
         <div ref={sentinelRef} className="h-4" />
         {loadingMore && (
-          <p className="text-muted-foreground text-xs text-center py-4">Loading more…</p>
+          <p className="text-on-surface-variant text-xs text-center py-4">Loading more…</p>
         )}
         {!loadingMore && posts.length > 0 && posts.length >= total && (
-          <p className="text-muted-foreground text-xs text-center py-4">You&apos;re all caught up.</p>
+          <p className="text-on-surface-variant text-xs text-center py-4">You&apos;re all caught up.</p>
         )}
       </main>
 
-      {/* Fixed compose bar */}
-      {club.is_member && (
-        <>
-          <div className="fixed bottom-16 left-0 right-0 px-4 py-2 bg-white/95 backdrop-blur-sm border-t border-border z-40">
-            <div className="max-w-xl mx-auto">
-              <button
-                onClick={() => setComposerOpen(true)}
-                className="w-full flex items-center gap-3 px-4 py-2.5 rounded-full bg-muted hover:bg-muted/80 transition-colors text-sm text-muted-foreground"
-              >
-                Post in {club.name}…
-              </button>
-            </div>
-          </div>
-
-          {composerOpen && (
-            <>
-              <div
-                onClick={() => { setComposerOpen(false); setPollDraft(null); }}
-                className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100]"
-              />
-              <div className="fixed bottom-[4.5rem] left-1/2 -translate-x-1/2 w-[min(600px,94vw)] bg-white rounded-2xl z-[101] shadow-2xl max-h-[80vh] flex flex-col">
-                <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
-                  <span className="font-semibold text-sm">Post in {club.name}</span>
-                  <button
-                    onClick={() => { setComposerOpen(false); setPollDraft(null); }}
-                    className="rounded-full p-1 hover:bg-muted text-muted-foreground transition-colors"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                <div className="overflow-y-auto flex-1">
-                  <form onSubmit={handlePost} className="px-4 py-3 space-y-3">
-                    <textarea
-                      autoFocus
-                      value={content}
-                      onChange={(e) => setContent(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault();
-                          (e.currentTarget.closest("form") as HTMLFormElement)?.requestSubmit();
-                        }
-                      }}
-                      placeholder={`Post in ${club.name}…`}
-                      rows={4}
-                      className="w-full resize-none text-sm placeholder:text-muted-foreground border-0 outline-none focus:ring-0 bg-transparent min-h-[90px]"
-                    />
-                    <div className="border-t border-border pt-3 space-y-3">
-                      <ImageUploader
-                        key={uploaderKey}
-                        onUrlsChange={(urls, uploading) => { setImageUrls(urls); setImagesUploading(uploading); }}
-                      />
-                      <FileUploader
-                        key={uploaderKey + 1000}
-                        onChange={(attachments, uploading) => { setFileAttachments(attachments); setFilesUploading(uploading); }}
-                      />
-                      <PollComposer value={pollDraft} onChange={setPollDraft} />
-                      <div className="flex items-center gap-2">
-                        {postError && <p className="text-xs text-destructive">{postError}</p>}
-                        <Button
-                          type="submit"
-                          size="sm"
-                          className="ml-auto"
-                          disabled={submitting || imagesUploading || filesUploading || (!content.trim() && !imageUrls.length && !pollDraft && !fileAttachments.length)}
-                        >
-                          {imagesUploading || filesUploading ? "Uploading…" : submitting ? "Posting…" : "Post"}
-                        </Button>
-                      </div>
-                    </div>
-                  </form>
-                </div>
-              </div>
-            </>
-          )}
-        </>
-      )}
 
       {/* Invite overlay */}
-      {inviteOpen && (
+      {inviteOpen && typeof document !== "undefined" && createPortal(
         <>
           <div
             onClick={() => { setInviteOpen(false); setInviteMsg(null); setInviteUsername(""); }}
@@ -860,11 +836,12 @@ export default function ClubDetailPage() {
               </div>
             </form>
           </div>
-        </>
+        </>,
+        document.body
       )}
 
       {/* Members modal */}
-      {showMembers && (
+      {showMembers && typeof document !== "undefined" && createPortal(
         <>
           <div onClick={() => { setShowMembers(false); setMemberSearch(""); }} className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200]" />
           <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(360px,92vw)] bg-white rounded-2xl shadow-2xl z-[201] flex flex-col max-h-[65vh]">
@@ -952,7 +929,8 @@ export default function ClubDetailPage() {
               })()}
             </div>
           </div>
-        </>
+        </>,
+        document.body
       )}
     </>
   );

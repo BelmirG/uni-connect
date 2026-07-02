@@ -14,6 +14,8 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import { InlineComposer } from "@/components/InlineComposer";
+import { SkeletonPostList } from "@/components/Skeleton";
 import { ImageUploader } from "@/components/ImageUploader";
 import { ImageGrid } from "@/components/ImageGrid";
 import { FileUploader, FileAttachment } from "@/components/FileUploader";
@@ -80,7 +82,7 @@ function SharePanel({ postId }: { postId: string }) {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors"
       >
         <Share2 className="w-4 h-4" />
       </button>
@@ -229,28 +231,28 @@ export default function QAPage() {
 
   const pillCls = (active: boolean) =>
     cn(
-      "text-xs font-medium px-3 py-1 rounded-full border transition-colors",
+      "text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap",
       active
-        ? "bg-primary text-primary-foreground border-primary"
-        : "border-border text-muted-foreground hover:border-foreground hover:text-foreground bg-background"
+        ? "bg-primary/10 text-primary border-primary/20"
+        : "bg-surface border-outline-variant text-on-surface-variant hover:bg-surface-container"
     );
 
   return (
     <>
-      <main className="max-w-xl mx-auto px-4 pt-4 pb-36">
+      <main className="max-w-xl mx-auto px-4 pt-4 pb-8">
         {/* Header */}
         <div className="mb-4">
-          <h1 className="text-xl font-bold text-foreground mb-1">Anonymous Q&amp;A</h1>
+          <h1 className="text-xl font-bold text-on-surface mb-1">Anonymous Q&amp;A</h1>
           <div className="flex items-start gap-2 p-3 rounded-xl bg-primary/5 border border-primary/15">
             <ShieldCheck className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
-            <p className="text-xs text-muted-foreground leading-relaxed">
+            <p className="text-xs text-on-surface-variant leading-relaxed">
               All posts are fully anonymous. Your identity is never visible to other students — only administrators can see authorship for moderation.
             </p>
           </div>
         </div>
 
-        {/* Faculty filter pills */}
-        <div className="flex gap-1.5 mb-4 flex-wrap">
+        {/* Faculty filter chips — horizontal scroll */}
+        <div className="flex overflow-x-auto gap-2 mb-4 no-scrollbar pb-1 -mx-4 px-4">
           <button onClick={() => setFacultyFilter(null)} className={pillCls(facultyFilter === null)}>All</button>
           {FACULTIES.map((f) => (
             <button
@@ -263,10 +265,66 @@ export default function QAPage() {
           ))}
         </div>
 
-        {/* List */}
-        {loading && <p className="text-muted-foreground text-sm text-center py-8">Loading…</p>}
+        {/* Inline expanding composer */}
+        <InlineComposer
+          open={composerOpen}
+          onOpen={() => setComposerOpen(true)}
+          icon={<Lock className="w-4 h-4" />}
+          placeholder="Ask a question anonymously…"
+          className="mb-4"
+        >
+          <form onSubmit={handlePost} className="px-4 pt-3 pb-3 space-y-3">
+            <textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              placeholder="Ask a question anonymously…"
+              rows={4}
+              className="w-full resize-none text-sm bg-transparent focus:outline-none text-on-surface placeholder:text-on-surface-variant/60"
+            />
+            <div className="border-t border-outline-variant/40 pt-2 space-y-3">
+              <ImageUploader
+                key={uploaderKey}
+                onUrlsChange={(urls, uploading) => { setImageUrls(urls); setImagesUploading(uploading); }}
+              />
+              <FileUploader
+                key={uploaderKey + 1000}
+                onChange={(attachments, uploading) => { setFileAttachments(attachments); setFilesUploading(uploading); }}
+              />
+              <div className="flex items-center gap-2 flex-wrap">
+                <select
+                  value={facultyTag}
+                  onChange={(e) => setFacultyTag(e.target.value as Faculty | "")}
+                  className="text-xs border border-input rounded-md px-2.5 py-1.5 bg-background text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">Tag faculty (optional)</option>
+                  {FACULTIES.map((f) => (
+                    <option key={f} value={f}>{f} — {FACULTY_NAMES[f]}</option>
+                  ))}
+                </select>
+                {postError && <p className="text-xs text-destructive">{postError}</p>}
+                <div className="ml-auto flex items-center gap-2">
+                  <span className="flex items-center gap-1 text-xs text-on-surface-variant">
+                    <Lock className="w-3 h-3" />
+                    anonymous
+                  </span>
+                  <button type="button" onClick={() => setComposerOpen(false)} className="text-xs text-on-surface-variant hover:text-on-surface transition-colors px-2 py-1">Cancel</button>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={submitting || imagesUploading || filesUploading || (!content.trim() && !imageUrls.length && !fileAttachments.length)}
+                  >
+                    {imagesUploading || filesUploading ? "Uploading…" : submitting ? "Posting…" : "Post"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </form>
+        </InlineComposer>
+
+        {/* Post list */}
+        {loading && <SkeletonPostList />}
         {!loading && posts.length === 0 && (
-          <p className="text-muted-foreground text-sm text-center py-8">
+          <p className="text-on-surface-variant text-sm text-center py-8">
             {facultyFilter ? `No questions tagged ${facultyFilter} yet.` : "No questions yet. Ask one!"}
           </p>
         )}
@@ -275,15 +333,15 @@ export default function QAPage() {
           {posts.map((post) => {
             const voted = post.current_user_vote;
             return (
-              <div key={post.id} className="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
+              <div key={post.id} className="bg-surface rounded-xl border border-outline-variant overflow-hidden">
                 {/* Anonymous header */}
                 <div className="flex items-center gap-2 px-4 pt-4 pb-3">
                   <div className="flex-1 min-w-0">
-                    <span className="font-semibold text-sm text-foreground">Anonymous</span>
-                    <span className="text-muted-foreground text-xs"> · {timeAgo(post.created_at)}</span>
+                    <span className="font-semibold text-sm text-on-surface">Anonymous</span>
+                    <span className="text-on-surface-variant text-xs"> · {timeAgo(post.created_at)}</span>
                   </div>
                   {post.faculty_tag && (
-                    <span className="text-[11px] font-semibold tracking-wide px-2 py-0.5 rounded-full bg-muted text-muted-foreground flex-shrink-0">
+                    <span className="text-[11px] font-semibold tracking-wide px-2 py-0.5 rounded-full bg-surface-container text-on-surface-variant flex-shrink-0">
                       {post.faculty_tag}
                     </span>
                   )}
@@ -305,45 +363,55 @@ export default function QAPage() {
 
                 {/* Content */}
                 {post.content && (
-                  <p className="px-4 pb-3 text-sm leading-relaxed whitespace-pre-wrap text-foreground">
+                  <p className="px-4 pb-3 text-body-sm leading-relaxed whitespace-pre-wrap text-on-surface">
                     {post.content}
                   </p>
                 )}
 
                 {/* Action bar */}
-                <div className="flex items-center px-2 py-1 border-t border-border/60">
-                  <button
-                    onClick={() => handleVote(post.id, "up")}
-                    className={cn(
-                      "flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors",
-                      voted === "up" ? "text-orange-500" : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                    )}
-                  >
-                    <ChevronUp className="w-4 h-4" />
-                    {post.upvotes}
-                  </button>
-                  <button
-                    onClick={() => handleVote(post.id, "down")}
-                    className={cn(
-                      "flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors",
-                      voted === "down" ? "text-indigo-500" : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                    )}
-                  >
-                    <ChevronDown className="w-4 h-4" />
-                    {post.downvotes}
-                  </button>
+                <div className="flex items-center gap-1 px-3 py-2 border-t border-surface-variant">
+                  {/* Vote pill */}
+                  <div className="flex items-center bg-surface-container-low rounded-lg border border-outline-variant overflow-hidden">
+                    <button
+                      onClick={() => handleVote(post.id, "up")}
+                      className={cn(
+                        "flex items-center gap-1 px-2 py-1.5 text-xs font-semibold transition-colors",
+                        voted === "up" ? "text-blue-500" : "text-on-surface-variant hover:text-blue-500"
+                      )}
+                    >
+                      <ChevronUp className="w-3.5 h-3.5" />
+                      <span className="tabular-nums">{post.upvotes}</span>
+                    </button>
+                    <span className="w-px h-4 bg-outline-variant flex-shrink-0" />
+                    <button
+                      onClick={() => handleVote(post.id, "down")}
+                      className={cn(
+                        "flex items-center gap-1 px-2 py-1.5 text-xs font-semibold transition-colors",
+                        voted === "down" ? "text-yellow-500" : "text-on-surface-variant hover:text-yellow-500"
+                      )}
+                    >
+                      <ChevronDown className="w-3.5 h-3.5" />
+                      <span className="tabular-nums">{post.downvotes}</span>
+                    </button>
+                  </div>
+
+                  {/* Replies */}
                   <Link
                     href={`/qa/${post.id}`}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors no-underline"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors no-underline"
                   >
                     <MessageCircle className="w-4 h-4" />
                     {post.reply_count} {post.reply_count === 1 ? "answer" : "answers"}
                   </Link>
+
+                  {/* Share */}
                   <SharePanel postId={post.id} />
+
+                  {/* Delete (own posts) */}
                   {post.is_own && (
                     <button
                       onClick={() => handleDelete(post.id)}
-                      className="ml-auto flex items-center px-2.5 py-1.5 rounded-lg text-muted-foreground/40 hover:text-destructive hover:bg-destructive/5 transition-colors"
+                      className="ml-auto flex items-center px-2 py-1.5 rounded-lg text-on-surface-variant/40 hover:text-error hover:bg-error-container/30 transition-colors"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -356,92 +424,13 @@ export default function QAPage() {
 
         <div ref={sentinelRef} className="h-4" />
         {loadingMore && (
-          <p className="text-muted-foreground text-xs text-center py-4">Loading more…</p>
+          <p className="text-on-surface-variant text-xs text-center py-4">Loading more…</p>
         )}
         {!loadingMore && posts.length > 0 && posts.length >= total && (
-          <p className="text-muted-foreground text-xs text-center py-4">You&apos;re all caught up.</p>
+          <p className="text-on-surface-variant text-xs text-center py-4">You&apos;re all caught up.</p>
         )}
       </main>
 
-      {/* Fixed compose bar */}
-      <div className="fixed bottom-16 left-0 right-0 px-4 py-2 bg-white/95 backdrop-blur-sm border-t border-border z-40">
-        <div className="max-w-xl mx-auto">
-          <button
-            onClick={() => setComposerOpen(true)}
-            className="w-full flex items-center gap-3 px-4 py-2.5 rounded-full bg-muted hover:bg-muted/80 transition-colors text-sm text-muted-foreground"
-          >
-            <Lock className="w-4 h-4 flex-shrink-0" />
-            Ask a question anonymously…
-          </button>
-        </div>
-      </div>
-
-      {/* Compose sheet */}
-      {composerOpen && (
-        <>
-          <div onClick={() => setComposerOpen(false)} className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100]" />
-          <div className="fixed bottom-[4.5rem] left-1/2 -translate-x-1/2 w-[min(600px,94vw)] bg-white rounded-2xl z-[101] shadow-2xl max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-sm">Ask anonymously</span>
-                <span className="flex items-center gap-1 text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-full">
-                  <Lock className="w-2.5 h-2.5" />
-                  anonymous
-                </span>
-              </div>
-              <button
-                onClick={() => setComposerOpen(false)}
-                className="rounded-full p-1 hover:bg-muted text-muted-foreground transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="overflow-y-auto flex-1">
-              <form onSubmit={handlePost} className="px-4 py-3 space-y-3">
-                <textarea
-                  autoFocus
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  placeholder="Ask a question anonymously…"
-                  rows={4}
-                  className="w-full resize-none text-sm placeholder:text-muted-foreground border-0 outline-none focus:ring-0 bg-transparent min-h-[90px]"
-                />
-                <div className="border-t border-border pt-3 space-y-3">
-                  <ImageUploader
-                    key={uploaderKey}
-                    onUrlsChange={(urls, uploading) => { setImageUrls(urls); setImagesUploading(uploading); }}
-                  />
-                  <FileUploader
-                    key={uploaderKey + 1000}
-                    onChange={(attachments, uploading) => { setFileAttachments(attachments); setFilesUploading(uploading); }}
-                  />
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <select
-                      value={facultyTag}
-                      onChange={(e) => setFacultyTag(e.target.value as Faculty | "")}
-                      className="text-xs border border-input rounded-md px-2.5 py-1.5 bg-background text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                    >
-                      <option value="">Tag faculty (optional)</option>
-                      {FACULTIES.map((f) => (
-                        <option key={f} value={f}>{f} — {FACULTY_NAMES[f]}</option>
-                      ))}
-                    </select>
-                    {postError && <p className="text-xs text-destructive">{postError}</p>}
-                    <Button
-                      type="submit"
-                      size="sm"
-                      className="ml-auto"
-                      disabled={submitting || imagesUploading || filesUploading || (!content.trim() && !imageUrls.length && !fileAttachments.length)}
-                    >
-                      {imagesUploading || filesUploading ? "Uploading…" : submitting ? "Posting…" : "Post anonymously"}
-                    </Button>
-                  </div>
-                </div>
-              </form>
-            </div>
-          </div>
-        </>
-      )}
     </>
   );
 }

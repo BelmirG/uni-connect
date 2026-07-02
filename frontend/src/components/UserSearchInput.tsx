@@ -21,11 +21,13 @@ export default function UserSearchInput({ value, onChange, onSelect, placeholder
   const [results, setResults] = useState<UserResult[]>([]);
   const [open, setOpen] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const justSelectedRef = useRef(false);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (!value.trim()) { setResults([]); return; }
     debounceRef.current = setTimeout(async () => {
+      if (justSelectedRef.current) { justSelectedRef.current = false; return; }
       try {
         const data = await apiFetch<UserResult[]>(`/api/messages/search-users?q=${encodeURIComponent(value)}`);
         setResults(data);
@@ -66,7 +68,7 @@ export default function UserSearchInput({ value, onChange, onSelect, placeholder
             <button
               key={r.username}
               type="button"
-              onMouseDown={() => { onSelect(r.username); onChange(r.username); setOpen(false); }}
+              onMouseDown={() => { justSelectedRef.current = true; onSelect(r.username); onChange(r.username); setOpen(false); setResults([]); }}
               style={{
                 display: "block", width: "100%", textAlign: "left",
                 padding: "0.45rem 0.75rem", border: "none",

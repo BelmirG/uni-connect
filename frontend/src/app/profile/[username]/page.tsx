@@ -8,6 +8,7 @@ import type { Area, Point } from "react-easy-crop";
 import { apiFetch, ApiError } from "@/lib/api";
 import { ImageGrid } from "@/components/ImageGrid";
 import MiniAvatar from "@/components/MiniAvatar";
+import { SkeletonProfile } from "@/components/Skeleton";
 import { FACULTIES, FACULTY_NAMES, FACULTY_PROGRAMS, Faculty } from "@/lib/faculties";
 import { timeAgo } from "@/lib/timeAgo";
 import { Button } from "@/components/ui/button";
@@ -155,6 +156,8 @@ export default function ProfilePage() {
   const [notifOpen, setNotifOpen] = useState(false);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [followNotifs, setFollowNotifs] = useState<FollowNotif[]>([]);
+
+  const [tab, setTab] = useState<"posts" | "clubs">("posts");
 
   useEffect(() => {
     setLoading(true);
@@ -372,8 +375,8 @@ export default function ProfilePage() {
 
   if (loading) {
     return (
-      <main className="max-w-xl mx-auto px-4 pt-12 pb-36 flex justify-center">
-        <p className="text-muted-foreground text-sm">Loading…</p>
+      <main className="max-w-xl mx-auto px-4 pt-4 pb-36">
+        <SkeletonProfile />
       </main>
     );
   }
@@ -516,8 +519,12 @@ export default function ProfilePage() {
 
           {/* Stats row */}
           <div className="flex items-center gap-4 mt-3 pt-3 border-t border-border/60 text-sm">
-            <span><strong className="text-foreground">{profile.post_count}</strong> <span className="text-muted-foreground">posts</span></span>
-            <span><strong className="text-foreground">{profile.club_count}</strong> <span className="text-muted-foreground">clubs</span></span>
+            <button onClick={() => setTab("posts")} className="bg-transparent border-0 p-0 cursor-pointer text-sm">
+              <strong className="text-foreground">{profile.post_count}</strong> <span className="text-muted-foreground">posts</span>
+            </button>
+            <button onClick={() => setTab("clubs")} className="bg-transparent border-0 p-0 cursor-pointer text-sm">
+              <strong className="text-foreground">{profile.club_count}</strong> <span className="text-muted-foreground">clubs</span>
+            </button>
             <button onClick={() => openFollowsModal("followers")} className="bg-transparent border-0 p-0 cursor-pointer text-sm">
               <strong className="text-foreground">{profile.follower_count}</strong> <span className="text-muted-foreground">followers</span>
             </button>
@@ -677,70 +684,108 @@ export default function ProfilePage() {
           </div>
         )}
 
+        {/* Section switcher — Posts / Clubs */}
+        <div className="flex gap-1 p-1 bg-surface-container-low border border-outline-variant rounded-full mb-4">
+          {([
+            ["posts", "Posts", profile.post_count],
+            ["clubs", "Clubs", profile.club_count],
+          ] as const).map(([key, label, count]) => {
+            const isActive = tab === key;
+            return (
+              <button
+                key={key}
+                onClick={() => setTab(key)}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-1.5 py-2 text-sm font-medium rounded-full transition-all",
+                  isActive
+                    ? "bg-surface text-on-surface shadow-sm"
+                    : "text-on-surface-variant hover:text-on-surface"
+                )}
+              >
+                {label}
+                <span className={cn(
+                  "text-xs tabular-nums px-1.5 py-0.5 rounded-full",
+                  isActive ? "bg-surface-container text-on-surface-variant" : "text-on-surface-variant/70"
+                )}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Posts */}
+        {tab === "posts" && (
+          posts.length === 0 ? (
+            <p className="text-sm text-on-surface-variant text-center py-12">No posts yet.</p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {posts.map((post) => (
+                <Link
+                  key={post.id}
+                  href={`/feed/${post.id}`}
+                  className="block bg-surface border border-outline-variant rounded-xl px-4 py-3 hover:bg-surface-container-low transition-colors no-underline"
+                >
+                  {post.faculty_tag && (
+                    <span className="inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full bg-surface-container text-on-surface-variant mb-2">
+                      {post.faculty_tag}
+                    </span>
+                  )}
+                  <ImageGrid urls={post.image_urls ?? []} />
+                  {post.content && (
+                    <p className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap mb-2">{post.content}</p>
+                  )}
+                  <div className="flex items-center gap-3 text-xs text-on-surface-variant">
+                    <span className="flex items-center gap-0.5"><ChevronUp className="w-3.5 h-3.5" />{post.upvotes}</span>
+                    <span className="flex items-center gap-0.5"><ChevronDown className="w-3.5 h-3.5" />{post.downvotes}</span>
+                    <span className="flex items-center gap-0.5"><MessageCircle className="w-3.5 h-3.5" />{post.reply_count}</span>
+                    <span className="ml-auto">{timeAgo(post.created_at)}</span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )
+        )}
+
         {/* Clubs */}
-        {clubs.length > 0 && (
-          <div className="mb-4">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Clubs</p>
-            <div className="flex flex-col gap-1.5">
+        {tab === "clubs" && (
+          clubs.length === 0 ? (
+            <p className="text-sm text-on-surface-variant text-center py-12">Not in any clubs yet.</p>
+          ) : (
+            <div className="flex flex-col gap-2">
               {clubs.map((club) => (
                 <Link
                   key={club.id}
                   href={`/clubs/${club.slug}`}
-                  className="flex items-center justify-between px-3.5 py-2.5 bg-white border border-border rounded-xl hover:bg-muted/40 transition-colors no-underline"
+                  className="flex items-center gap-3 p-3 bg-surface border border-outline-variant rounded-xl hover:bg-surface-container-low transition-colors no-underline"
                 >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-medium text-sm text-foreground truncate">{club.name}</span>
-                    {club.is_private && (
-                      <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground flex-shrink-0">
-                        <Lock className="w-2.5 h-2.5" />
-                        Private
-                      </span>
+                  <div className="w-11 h-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold text-base flex-shrink-0 uppercase">
+                    {club.name.charAt(0)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold text-sm text-on-surface truncate">{club.name}</span>
+                      {club.is_private && (
+                        <Lock className="w-3 h-3 text-on-surface-variant flex-shrink-0" />
+                      )}
+                    </div>
+                    {club.description && (
+                      <p className="text-xs text-on-surface-variant truncate mt-0.5">{club.description}</p>
                     )}
                   </div>
                   <span className={cn(
-                    "text-[10px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0 capitalize",
+                    "text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 capitalize",
                     club.role === "owner" ? "bg-purple-100 text-purple-700"
                       : club.role === "moderator" ? "bg-green-100 text-green-700"
-                      : "bg-muted text-muted-foreground"
+                      : "bg-surface-container text-on-surface-variant"
                   )}>
                     {club.role}
                   </span>
                 </Link>
               ))}
             </div>
-          </div>
+          )
         )}
-
-        {/* Posts */}
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Posts</p>
-        {posts.length === 0 && (
-          <p className="text-sm text-muted-foreground text-center py-8">No posts yet.</p>
-        )}
-        <div className="flex flex-col gap-3">
-          {posts.map((post) => (
-            <Link
-              key={post.id}
-              href={`/feed/${post.id}`}
-              className="block bg-white border border-border rounded-xl px-4 py-3 hover:bg-muted/20 transition-colors no-underline"
-            >
-              {post.faculty_tag && (
-                <span className="inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full bg-muted text-muted-foreground mb-2">
-                  {post.faculty_tag}
-                </span>
-              )}
-              <ImageGrid urls={post.image_urls ?? []} />
-              {post.content && (
-                <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap mb-2">{post.content}</p>
-              )}
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                <span className="flex items-center gap-0.5"><ChevronUp className="w-3.5 h-3.5" />{post.upvotes}</span>
-                <span className="flex items-center gap-0.5"><ChevronDown className="w-3.5 h-3.5" />{post.downvotes}</span>
-                <span className="flex items-center gap-0.5"><MessageCircle className="w-3.5 h-3.5" />{post.reply_count}</span>
-                <span className="ml-auto">{timeAgo(post.created_at)}</span>
-              </div>
-            </Link>
-          ))}
-        </div>
       </main>
 
       {/* ── Report modal ──────────────────────────────────────────────────────── */}

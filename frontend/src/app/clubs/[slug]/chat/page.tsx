@@ -11,6 +11,9 @@ import {
   ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import MiniAvatar from "@/components/MiniAvatar";
+
+const IUS_BLUE = "#3865a6";
 
 interface FileAttachment {
   url: string;
@@ -43,8 +46,6 @@ interface ChatMessage {
   created_at: string;
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
 function timeLabel(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
@@ -65,12 +66,12 @@ function parseQuote(content: string | null): { quote: string | null; body: strin
 }
 
 const NAME_COLORS = [
-  "text-rose-600", "text-orange-500", "text-amber-600",
-  "text-green-600", "text-teal-600", "text-cyan-600",
-  "text-violet-600", "text-purple-600", "text-pink-600", "text-indigo-500",
+  "#e11d48", "#ea580c", "#d97706",
+  "#16a34a", "#0d9488", "#0891b2",
+  "#7c3aed", "#9333ea", "#db2777", "#4f46e5",
 ];
 
-function authorColor(username: string) {
+function authorColor(username: string): string {
   let hash = 0;
   for (let i = 0; i < username.length; i++) hash = (hash * 31 + username.charCodeAt(i)) >>> 0;
   return NAME_COLORS[hash % NAME_COLORS.length];
@@ -95,29 +96,15 @@ function LightboxPortal({ urls, index, onChange, onClose }: {
   }, [index, urls.length, onChange, onClose]);
 
   return (
-    <div
-      onClick={onClose}
-      style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center" }}
-    >
-      <img
-        src={urls[index]}
-        alt="Preview"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: "90vw", maxHeight: "90vh", objectFit: "contain", borderRadius: 8 }}
-      />
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <img src={urls[index]} alt="Preview" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "90vw", maxHeight: "90vh", objectFit: "contain", borderRadius: 10 }} />
       {index > 0 && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onChange(index - 1); }}
-          style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
-        >
+        <button onClick={(e) => { e.stopPropagation(); onChange(index - 1); }} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <ChevronLeft style={{ width: 20, height: 20 }} />
         </button>
       )}
       {index < urls.length - 1 && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onChange(index + 1); }}
-          style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
-        >
+        <button onClick={(e) => { e.stopPropagation(); onChange(index + 1); }} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <ChevronRight style={{ width: 20, height: 20 }} />
         </button>
       )}
@@ -126,10 +113,7 @@ function LightboxPortal({ urls, index, onChange, onClose }: {
           {index + 1} / {urls.length}
         </div>
       )}
-      <button
-        onClick={(e) => { e.stopPropagation(); onClose(); }}
-        style={{ position: "absolute", top: 16, right: 16, width: 36, height: 36, borderRadius: "50%", background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", fontSize: "1.2rem", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
-      >×</button>
+      <button onClick={(e) => { e.stopPropagation(); onClose(); }} style={{ position: "absolute", top: 16, right: 16, width: 36, height: 36, borderRadius: "50%", background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", fontSize: "1.2rem", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
     </div>
   );
 }
@@ -143,67 +127,42 @@ function MediaSheet({ photos, docs, onPreview }: {
 }) {
   const [tab, setTab] = useState<"media" | "docs">("media");
   const allPhotoUrls = photos.map((p) => p.url);
-  const isInline = (a: FileAttachment) =>
-    a.mime_type === "application/pdf" || a.mime_type === "text/plain";
+  const isInline = (a: FileAttachment) => a.mime_type === "application/pdf" || a.mime_type === "text/plain";
 
   return (
     <>
-      <div className="flex border-b border-border flex-shrink-0">
+      <div className="flex border-b border-outline-variant flex-shrink-0">
         {(["media", "docs"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={cn(
-              "flex-1 py-2.5 text-sm font-semibold transition-colors relative",
-              tab === t ? "text-foreground" : "text-muted-foreground hover:text-foreground"
-            )}
-          >
+          <button key={t} onClick={() => setTab(t)} className={cn("flex-1 py-2.5 text-sm font-medium transition-colors relative", tab === t ? "text-on-surface" : "text-on-surface-variant hover:text-on-surface")}>
             {t === "media" ? "Media" : "Docs"}
-            {tab === t && <span className="absolute bottom-0 left-1/4 right-1/4 h-0.5 bg-primary rounded-full" />}
+            {tab === t && <span className="absolute bottom-0 left-1/4 right-1/4 h-0.5 bg-on-surface rounded-full" />}
           </button>
         ))}
       </div>
       <div className="overflow-y-auto flex-1 p-4">
         {tab === "media" && (
           photos.length === 0
-            ? <p className="text-sm text-muted-foreground text-center py-10">No photos yet.</p>
+            ? <p className="text-sm text-on-surface-variant text-center py-10">No photos yet.</p>
             : <div className="grid grid-cols-7 gap-0.5">
                 {photos.map((a, i) => (
-                  <img
-                    key={i}
-                    src={a.url}
-                    alt={a.name}
-                    onClick={() => onPreview(allPhotoUrls, i)}
-                    className="aspect-square object-cover rounded-sm cursor-zoom-in w-full"
-                  />
+                  <img key={i} src={a.url} alt={a.name} onClick={() => onPreview(allPhotoUrls, i)} className="aspect-square object-cover rounded-sm cursor-zoom-in w-full" />
                 ))}
               </div>
         )}
         {tab === "docs" && (
           docs.length === 0
-            ? <p className="text-sm text-muted-foreground text-center py-10">No files yet.</p>
-            : <div className="space-y-2 mx-4">
+            ? <p className="text-sm text-on-surface-variant text-center py-10">No files yet.</p>
+            : <div className="space-y-2">
                 {docs.map((a, i) => (
-                  <a
-                    key={i}
-                    href={a.url}
-                    {...(isInline(a)
-                      ? { target: "_blank", rel: "noopener noreferrer" }
-                      : { download: a.name }
-                    )}
-                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-border bg-muted/40 hover:bg-muted transition-colors no-underline group"
+                  <a key={i} href={a.url} {...(isInline(a) ? { target: "_blank", rel: "noopener noreferrer" } : { download: a.name })}
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-outline-variant bg-surface-container-low hover:bg-surface-container transition-colors no-underline group"
                   >
-                    <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                    <FileText className="w-4 h-4 text-on-surface-variant flex-shrink-0" />
                     <span className="flex-1 min-w-0">
-                      <span className="block text-sm font-medium text-foreground truncate">{a.name}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {fmtSize(a.size)}{isInline(a) ? " · Opens in browser" : " · Click to download"}
-                      </span>
+                      <span className="block text-sm font-medium text-on-surface truncate">{a.name}</span>
+                      <span className="text-xs text-on-surface-variant">{fmtSize(a.size)}{isInline(a) ? " · Opens in browser" : " · Click to download"}</span>
                     </span>
-                    {isInline(a)
-                      ? <ExternalLink className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground flex-shrink-0" />
-                      : <Download className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground flex-shrink-0" />
-                    }
+                    {isInline(a) ? <ExternalLink className="w-3.5 h-3.5 text-on-surface-variant group-hover:text-on-surface flex-shrink-0" /> : <Download className="w-3.5 h-3.5 text-on-surface-variant group-hover:text-on-surface flex-shrink-0" />}
                   </a>
                 ))}
               </div>
@@ -224,47 +183,27 @@ function BubbleAttachments({ attachments, isOwn, onPreview }: {
   const images = attachments.filter((a) => a.mime_type.startsWith("image/"));
   const docs = attachments.filter((a) => !a.mime_type.startsWith("image/"));
   const imageUrls = images.map((img) => img.url);
-  const isInline = (a: FileAttachment) =>
-    a.mime_type === "application/pdf" || a.mime_type === "text/plain";
+  const isInline = (a: FileAttachment) => a.mime_type === "application/pdf" || a.mime_type === "text/plain";
 
   return (
     <div className="flex flex-col gap-1 mt-1">
       {images.length > 0 && (
         <div className={cn("grid gap-1", images.length === 1 ? "grid-cols-1" : "grid-cols-2")}>
           {images.map((a, i) => (
-            <img
-              key={i}
-              src={a.url}
-              alt={a.name}
-              onClick={() => onPreview(imageUrls, i)}
-              className="rounded-lg object-cover cursor-zoom-in w-full"
-              style={{ maxHeight: 200 }}
-            />
+            <img key={i} src={a.url} alt={a.name} onClick={() => onPreview(imageUrls, i)} className="rounded-xl object-cover cursor-zoom-in w-full" style={{ maxHeight: 200 }} />
           ))}
         </div>
       )}
       {docs.map((a, i) => (
-        <a
-          key={i}
-          href={a.url}
-          {...(isInline(a)
-            ? { target: "_blank", rel: "noopener noreferrer" }
-            : { download: a.name }
-          )}
-          className={cn(
-            "flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs no-underline group",
-            isOwn ? "bg-white/15 hover:bg-white/25" : "bg-muted hover:bg-muted/80"
-          )}
+        <a key={i} href={a.url} {...(isInline(a) ? { target: "_blank", rel: "noopener noreferrer" } : { download: a.name })}
+          className={cn("flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs no-underline group", isOwn ? "bg-white/15 hover:bg-white/25" : "bg-surface-container hover:bg-surface-container-high")}
         >
-          <FileText className={cn("w-3.5 h-3.5 flex-shrink-0", isOwn ? "text-white/70" : "text-muted-foreground")} />
+          <FileText className={cn("w-3.5 h-3.5 flex-shrink-0", isOwn ? "text-white/70" : "text-on-surface-variant")} />
           <span className="flex-1 min-w-0">
-            <span className={cn("block truncate font-medium", isOwn ? "text-white/90" : "text-foreground")}>{a.name}</span>
-            <span className={cn(isOwn ? "text-white/50" : "text-muted-foreground")}>{fmtSize(a.size)}</span>
+            <span className={cn("block truncate font-medium", isOwn ? "text-white/90" : "text-on-surface")}>{a.name}</span>
+            <span className={cn(isOwn ? "text-white/50" : "text-on-surface-variant")}>{fmtSize(a.size)}</span>
           </span>
-          {isInline(a)
-            ? <ExternalLink className={cn("w-3 h-3 flex-shrink-0", isOwn ? "text-white/50" : "text-muted-foreground")} />
-            : <Download className={cn("w-3 h-3 flex-shrink-0", isOwn ? "text-white/50" : "text-muted-foreground")} />
-          }
+          {isInline(a) ? <ExternalLink className={cn("w-3 h-3 flex-shrink-0", isOwn ? "text-white/50" : "text-on-surface-variant")} /> : <Download className={cn("w-3 h-3 flex-shrink-0", isOwn ? "text-white/50" : "text-on-surface-variant")} />}
         </a>
       ))}
     </div>
@@ -337,7 +276,7 @@ function SwipeableBubble({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { quote, body } = parseQuote(msg.content);
-  const color = authorColor(msg.author.username);
+  const nameColor = authorColor(msg.author.username);
   const replyBtnOpacity = offset > 10 ? Math.min(offset / 40, 1) : hovered ? 1 : 0;
 
   return (
@@ -347,29 +286,40 @@ function SwipeableBubble({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
+      {/* Avatar — only for others, only on last in group */}
+      <div className="flex-shrink-0 w-7 mb-0.5">
+        {!isOwn && isLast && (
+          <MiniAvatar name={msg.author.display_name} url={msg.author.avatar_url ?? null} size={28} />
+        )}
+      </div>
+
       <div className="flex flex-col max-w-[72%]">
         {showName && !isOwn && (
-          <Link href={`/profile/${msg.author.username}`} className={cn("text-[11px] font-semibold mb-0.5 px-1 hover:underline", color)}>
+          <Link href={`/profile/${msg.author.username}`} className="text-[11px] font-semibold mb-0.5 px-1 hover:underline no-underline" style={{ color: nameColor }}>
             {msg.author.display_name}
           </Link>
         )}
         <div
           className={cn(
-            "px-3.5 py-2 text-sm leading-snug flex flex-col",
+            "px-3.5 py-2.5 text-sm leading-snug flex flex-col shadow-sm",
             isOwn
-              ? cn("bg-primary text-primary-foreground", isLast ? "rounded-2xl rounded-br-sm" : "rounded-xl")
-              : cn("bg-white border border-border text-foreground", isLast ? "rounded-2xl rounded-bl-sm" : "rounded-xl")
+              ? cn("text-white", isLast ? "rounded-2xl rounded-br-sm" : "rounded-xl")
+              : cn("bg-surface border border-outline-variant text-on-surface", isLast ? "rounded-2xl rounded-bl-sm" : "rounded-xl")
           )}
-          style={{ transform: `translateX(${offset}px)`, transition: offset === 0 ? "transform 0.2s ease" : "none" }}
+          style={{
+            backgroundColor: isOwn ? IUS_BLUE : undefined,
+            transform: `translateX(${offset}px)`,
+            transition: offset === 0 ? "transform 0.22s cubic-bezier(0.34,1.56,0.64,1)" : "none",
+          }}
         >
           {quote && (
             <button
               onClick={() => onScrollToQuote(quote)}
               className={cn(
-                "text-left text-xs px-2.5 py-1.5 rounded-lg mb-2 border-l-2 w-full cursor-pointer",
+                "text-left text-xs px-2.5 py-1.5 rounded-lg mb-2 border-l-2 w-full cursor-pointer transition-colors",
                 isOwn
-                  ? "bg-white/15 border-white/50 text-white/80 hover:bg-white/25"
-                  : "bg-muted border-primary/50 text-muted-foreground hover:bg-muted/80"
+                  ? "bg-white/15 border-white/40 text-white/80 hover:bg-white/25"
+                  : "bg-surface-container border-primary/40 text-on-surface-variant hover:bg-surface-container-high"
               )}
             >
               <span className="line-clamp-2 break-words">{quote}</span>
@@ -378,15 +328,16 @@ function SwipeableBubble({
           {body && <span className="whitespace-pre-wrap break-words">{body}</span>}
           <BubbleAttachments attachments={msg.attachments ?? []} isOwn={isOwn} onPreview={onPreviewImage} />
           {isLast && (
-            <span className={cn("text-[10px] self-end mt-1 ml-2 flex-shrink-0", isOwn ? "text-primary-foreground/50" : "text-muted-foreground")}>
+            <span className={cn("text-[10px] self-end mt-1.5 ml-2 flex-shrink-0", isOwn ? "text-white/45" : "text-on-surface-variant")}>
               {timeLabel(msg.created_at)}
             </span>
           )}
         </div>
       </div>
+
       <button
         onClick={() => onSwipeRef.current(msg)}
-        className="flex-shrink-0 self-center p-1 rounded-full text-muted-foreground"
+        className="flex-shrink-0 self-center p-1 rounded-full text-on-surface-variant"
         style={{ opacity: replyBtnOpacity, transition: offset === 0 ? "opacity 0.15s" : "none", pointerEvents: replyBtnOpacity > 0 ? "auto" : "none" }}
         tabIndex={-1}
       >
@@ -411,6 +362,8 @@ export default function ClubChatPage() {
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
   const [mediaOpen, setMediaOpen] = useState(false);
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
 
@@ -427,7 +380,6 @@ export default function ClubChatPage() {
 
   useEffect(() => {
     let cancelled = false;
-
     async function init() {
       try {
         const [history, me, club] = await Promise.all([
@@ -444,7 +396,6 @@ export default function ClubChatPage() {
         else if (err instanceof ApiError && err.status === 403) router.replace(`/clubs/${slug}`);
         return;
       }
-
       const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(`${proto}//${window.location.host}/api/clubs/${slug}/chat/ws`);
       wsRef.current = ws;
@@ -456,13 +407,8 @@ export default function ClubChatPage() {
       ws.onclose = () => setStatus("disconnected");
       ws.onerror = () => setStatus("disconnected");
     }
-
     init();
-    return () => {
-      cancelled = true;
-      wsRef.current?.close();
-      wsRef.current = null;
-    };
+    return () => { cancelled = true; wsRef.current?.close(); wsRef.current = null; };
   }, [slug, router]);
 
   async function uploadFile(file: File): Promise<{ attachment: FileAttachment | null; localUrl?: string }> {
@@ -471,18 +417,13 @@ export default function ClubChatPage() {
     const fd = new FormData();
     fd.append("file", file);
     try {
-      const res = await fetch(isImage ? "/api/upload" : "/api/upload/file", {
-        method: "POST", credentials: "include", body: fd,
-      });
+      const res = await fetch(isImage ? "/api/upload" : "/api/upload/file", { method: "POST", credentials: "include", body: fd });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { detail?: string };
         throw new Error(body.detail ?? "Upload failed");
       }
       const raw = await res.json() as { url?: string; name?: string; size?: number; mime_type?: string };
-      return {
-        attachment: { url: raw.url ?? "", name: raw.name ?? file.name, size: raw.size ?? file.size, mime_type: raw.mime_type ?? file.type },
-        localUrl,
-      };
+      return { attachment: { url: raw.url ?? "", name: raw.name ?? file.name, size: raw.size ?? file.size, mime_type: raw.mime_type ?? file.type }, localUrl };
     } catch {
       return { attachment: null, localUrl };
     }
@@ -502,11 +443,7 @@ export default function ClubChatPage() {
       const uid = placeholders[i].uid;
       const { attachment, localUrl } = await uploadFile(file);
       setPendingAttachments((prev) =>
-        prev.map((p) =>
-          p.uid === uid
-            ? { ...p, attachment, uploading: false, localUrl: localUrl ?? p.localUrl, error: attachment ? null : "Upload failed" }
-            : p
-        )
+        prev.map((p) => p.uid === uid ? { ...p, attachment, uploading: false, localUrl: localUrl ?? p.localUrl, error: attachment ? null : "Upload failed" } : p)
       );
     }));
   }
@@ -517,7 +454,6 @@ export default function ClubChatPage() {
     const readyAttachments = pendingAttachments.filter((p) => p.attachment !== null).map((p) => p.attachment!);
     if (!text && !readyAttachments.length) return;
     if (pendingAttachments.some((p) => p.uploading)) return;
-
     const contentWithQuote = replyTo && text ? `> ${(replyTo.content ?? "").slice(0, 80)}\n\n${text}` : text;
     wsRef.current.send(JSON.stringify({ content: contentWithQuote || undefined, attachments: readyAttachments }));
     setInput("");
@@ -527,10 +463,7 @@ export default function ClubChatPage() {
   }
 
   function handleSubmit(e: React.FormEvent) { e.preventDefault(); send(); }
-
-  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
-  }
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }
 
   function scrollToQuote(quote: string) {
     const target = messagesRef.current.find((m) => m.content === quote || (m.content ?? "").startsWith(quote));
@@ -539,7 +472,7 @@ export default function ClubChatPage() {
     if (!el) return;
     el.scrollIntoView({ behavior: "smooth", block: "center" });
     el.style.transition = "none";
-    el.style.backgroundColor = "rgba(59,130,246,0.15)";
+    el.style.backgroundColor = "rgba(56,101,166,0.12)";
     el.style.borderRadius = "12px";
     requestAnimationFrame(() => requestAnimationFrame(() => {
       el.style.transition = "background-color 1.3s ease, border-radius 1.3s ease";
@@ -561,62 +494,65 @@ export default function ClubChatPage() {
     (pendingAttachments.some((p) => p.attachment !== null) && !pendingAttachments.some((p) => p.uploading))
   );
 
-  // Media sheet data
   const allAttachments = messages.flatMap((m) => m.attachments ?? []);
   const mediaPhotos = allAttachments.filter((a) => a.mime_type.startsWith("image/"));
   const mediaDocs = allAttachments.filter((a) => !a.mime_type.startsWith("image/"));
 
   return (
-    <main className="fixed top-0 bottom-[60px] left-1/2 -translate-x-1/2 w-full max-w-[700px] flex flex-col bg-background">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-white flex-shrink-0">
-        <Link href={`/clubs/${slug}`} className="flex items-center text-muted-foreground hover:text-foreground transition-colors no-underline flex-shrink-0">
-          <ArrowLeft className="w-4 h-4" />
+    <main className="flex flex-col bg-background max-w-[700px] w-full mx-auto overflow-hidden" style={{ height: "100svh" }}>
+
+      {/* Header — glass */}
+      <div
+        className="flex items-center gap-3 px-4 py-3 flex-shrink-0 border-b border-outline-variant/50"
+        style={{ background: "rgba(255,255,255,0.88)", backdropFilter: "blur(20px) saturate(160%)", WebkitBackdropFilter: "blur(20px) saturate(160%)" }}
+      >
+        <Link href={`/clubs/${slug}`} className="flex items-center text-on-surface-variant hover:text-on-surface transition-colors no-underline flex-shrink-0">
+          <ArrowLeft className="w-5 h-5" />
         </Link>
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-sm text-foreground truncate">{clubName || "Chat"}</p>
-          <p className="text-[11px] text-muted-foreground">Club chat</p>
-        </div>
-        <div className="flex items-center gap-1.5 text-xs flex-shrink-0">
-          <span className={cn("w-2 h-2 rounded-full", status === "connected" ? "bg-green-500" : status === "connecting" ? "bg-yellow-400" : "bg-destructive")} />
-          <span className="text-muted-foreground">
+          <p className="font-semibold text-sm text-on-surface truncate leading-tight">{clubName || "Chat"}</p>
+          <p className="text-[11px] text-on-surface-variant flex items-center gap-1 leading-tight">
+            <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", status === "connected" ? "bg-green-500" : status === "connecting" ? "bg-yellow-400" : "bg-destructive")} />
             {status === "connected" ? "Live" : status === "connecting" ? "Connecting…" : "Disconnected"}
-          </span>
+          </p>
         </div>
-        {/* Three-dots menu */}
-        <div className="relative">
+        <div className="relative flex-shrink-0">
           <button
-            onClick={() => setMenuOpen((o) => !o)}
-            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors"
+            ref={menuBtnRef}
+            onClick={() => {
+              if (menuOpen) { setMenuOpen(false); return; }
+              const rect = menuBtnRef.current?.getBoundingClientRect();
+              if (rect) setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+              setMenuOpen(true);
+            }}
+            className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant transition-colors"
           >
             <MoreVertical className="w-4 h-4" />
           </button>
-          {menuOpen && (
+          {menuOpen && menuPos && typeof document !== "undefined" && createPortal(
             <>
-              <div onClick={() => setMenuOpen(false)} className="fixed inset-0 z-[199]" />
-              <div className="absolute right-0 top-[calc(100%+4px)] bg-white border border-border rounded-xl shadow-lg min-w-[160px] z-[200] overflow-hidden">
-                <button
-                  onClick={() => { setMenuOpen(false); setMediaOpen(true); }}
-                  className="flex items-center gap-2 w-full text-left px-4 py-2.5 text-sm text-foreground hover:bg-muted transition-colors"
-                >
-                  <GalleryHorizontalEnd className="w-3.5 h-3.5" />
-                  Media
+              <div onClick={() => setMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 299 }} />
+              <div style={{ position: "fixed", top: menuPos.top, right: menuPos.right, zIndex: 300, background: "white", border: "1px solid var(--outline-variant, #e0e0e0)", borderRadius: 16, boxShadow: "0 4px 24px rgba(0,0,0,0.12)", minWidth: 170, overflow: "hidden" }}>
+                <button onClick={() => { setMenuOpen(false); setMediaOpen(true); }} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "10px 16px", fontSize: "0.875rem", background: "none", border: "none", cursor: "pointer" }} onMouseEnter={e => (e.currentTarget.style.background = "#f5f5f5")} onMouseLeave={e => (e.currentTarget.style.background = "none")}>
+                  <GalleryHorizontalEnd style={{ width: 14, height: 14, color: "#6b7280", flexShrink: 0 }} />
+                  Media &amp; Files
                 </button>
               </div>
-            </>
+            </>,
+            document.body
           )}
         </div>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-1 bg-muted/30">
+      <div className="flex-1 overflow-y-auto px-3 py-4 flex flex-col gap-1">
         {messages.length === 0 && status === "connected" && (
-          <p className="text-muted-foreground text-sm text-center m-auto">No messages yet. Say hello!</p>
+          <p className="text-on-surface-variant text-sm text-center m-auto">No messages yet. Say hello!</p>
         )}
         {grouped.map((group, gi) => {
           const isOwn = group.author.username === currentUsername;
           return (
-            <div key={gi} className="flex flex-col gap-0.5 mb-1">
+            <div key={gi} className={cn("flex flex-col gap-0.5 mb-1", isOwn ? "items-end" : "items-start")}>
               {group.msgs.map((msg, mi) => (
                 <SwipeableBubble
                   key={msg.id}
@@ -627,10 +563,7 @@ export default function ClubChatPage() {
                   onSwipe={(m) => { setReplyTo(m); setTimeout(() => inputRef.current?.focus(), 50); }}
                   onScrollToQuote={scrollToQuote}
                   onPreviewImage={(urls, idx) => setLightbox({ urls, index: idx })}
-                  msgRef={(el) => {
-                    if (el) msgRefs.current.set(msg.id, el);
-                    else msgRefs.current.delete(msg.id);
-                  }}
+                  msgRef={(el) => { if (el) msgRefs.current.set(msg.id, el); else msgRefs.current.delete(msg.id); }}
                 />
               ))}
             </div>
@@ -639,42 +572,35 @@ export default function ClubChatPage() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Reply preview */}
+      {/* Reply strip */}
       {replyTo && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-muted/60 border-t border-border flex-shrink-0">
-          <CornerUpLeft className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-          <p className="flex-1 text-xs text-muted-foreground truncate">
-            <span className="font-medium text-foreground">{replyTo.author.display_name}:</span>{" "}
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-surface-container-low border-t border-outline-variant/60 flex-shrink-0">
+          <CornerUpLeft className="w-3.5 h-3.5 flex-shrink-0" style={{ color: IUS_BLUE }} />
+          <p className="flex-1 text-xs text-on-surface-variant truncate">
+            <span className="font-semibold text-on-surface">{replyTo.author.display_name}:</span>{" "}
             {(replyTo.content ?? "").slice(0, 80)}
           </p>
-          <button onClick={() => setReplyTo(null)} className="text-muted-foreground hover:text-foreground">
+          <button onClick={() => setReplyTo(null)} className="text-on-surface-variant hover:text-on-surface transition-colors">
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
-      {/* Pending attachments strip */}
+      {/* Pending attachments */}
       {pendingAttachments.length > 0 && (
-        <div className="flex items-center gap-2 px-4 py-2 border-t border-border bg-white flex-shrink-0 overflow-x-auto">
+        <div className="flex items-center gap-2 px-4 py-2.5 border-t border-outline-variant/60 bg-surface flex-shrink-0 overflow-x-auto">
           {pendingAttachments.map((p) => (
             <div key={p.uid} className="relative flex-shrink-0">
               {p.localUrl ? (
-                <img src={p.localUrl} alt={p.name} className="w-14 h-14 object-cover rounded-lg border border-border" />
+                <img src={p.localUrl} alt={p.name} className="w-14 h-14 object-cover rounded-xl border border-outline-variant" />
               ) : (
-                <div className="w-14 h-14 rounded-lg border border-border bg-muted flex flex-col items-center justify-center gap-1 px-1">
-                  <FileText className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-[9px] text-muted-foreground text-center truncate w-full px-0.5">{p.name}</span>
+                <div className="w-14 h-14 rounded-xl border border-outline-variant bg-surface-container flex flex-col items-center justify-center gap-1 px-1">
+                  <FileText className="w-4 h-4 text-on-surface-variant" />
+                  <span className="text-[9px] text-on-surface-variant text-center truncate w-full px-0.5">{p.name}</span>
                 </div>
               )}
-              {p.uploading && (
-                <div className="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center">
-                  <span className="text-white text-[9px]">…</span>
-                </div>
-              )}
-              <button
-                onClick={() => setPendingAttachments((prev) => prev.filter((a) => a.uid !== p.uid))}
-                className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-foreground text-background flex items-center justify-center"
-              >
+              {p.uploading && <div className="absolute inset-0 bg-black/35 rounded-xl flex items-center justify-center"><span className="text-white text-[9px]">…</span></div>}
+              <button onClick={() => setPendingAttachments((prev) => prev.filter((a) => a.uid !== p.uid))} className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-on-surface text-background flex items-center justify-center">
                 <X className="w-2.5 h-2.5" />
               </button>
             </div>
@@ -682,30 +608,28 @@ export default function ClubChatPage() {
         </div>
       )}
 
-      {/* Input */}
-      <form onSubmit={handleSubmit} className="flex items-end gap-2 px-4 py-3 border-t border-border bg-white flex-shrink-0">
+      {/* Input bar — glass */}
+      <form
+        onSubmit={handleSubmit}
+        className="flex items-end gap-2.5 px-3 py-3 border-t border-outline-variant/50 flex-shrink-0"
+        style={{ background: "rgba(255,255,255,0.92)", backdropFilter: "blur(20px) saturate(160%)", WebkitBackdropFilter: "blur(20px) saturate(160%)" }}
+      >
         <input ref={photoInputRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple className="hidden" onChange={(e) => handleMediaSelect(e.target.files)} />
         <input ref={fileInputRef} type="file" accept=".pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.py,.js,.ts,.jsx,.tsx,.java,.c,.cpp,.h,.cs,.go,.rs,.rb,.php,.json,.yaml,.yml,.toml,.xml,.sh,.sql" multiple className="hidden" onChange={(e) => handleMediaSelect(e.target.files)} />
 
-        {/* Attach button */}
         <div className="relative flex-shrink-0 self-end mb-0.5">
-          <button
-            type="button"
-            onClick={() => setAttachMenuOpen((o) => !o)}
-            disabled={status !== "connected"}
-            className="w-9 h-9 rounded-full border border-input bg-background flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
-          >
+          <button type="button" onClick={() => setAttachMenuOpen((o) => !o)} disabled={status !== "connected"} className="w-9 h-9 rounded-full bg-surface border border-outline-variant flex items-center justify-center text-on-surface-variant hover:bg-surface-container transition-colors disabled:opacity-40">
             <Plus className="w-4 h-4" />
           </button>
           {attachMenuOpen && (
             <>
               <div onClick={() => setAttachMenuOpen(false)} className="fixed inset-0 z-[10]" />
-              <div className="absolute bottom-[calc(100%+6px)] left-0 bg-white border border-border rounded-xl shadow-lg min-w-[140px] z-[20] overflow-hidden">
-                <button type="button" onClick={() => { setAttachMenuOpen(false); photoInputRef.current?.click(); }} className="flex items-center gap-2 w-full text-left px-4 py-2.5 text-sm text-foreground hover:bg-muted transition-colors">
-                  <ImageIcon className="w-3.5 h-3.5 text-muted-foreground" /> Photo
+              <div className="absolute bottom-[calc(100%+6px)] left-0 bg-surface border border-outline-variant rounded-2xl shadow-xl min-w-[140px] z-[20] overflow-hidden">
+                <button type="button" onClick={() => { setAttachMenuOpen(false); photoInputRef.current?.click(); }} className="flex items-center gap-2.5 w-full text-left px-4 py-2.5 text-sm text-on-surface hover:bg-surface-container-low transition-colors">
+                  <ImageIcon className="w-3.5 h-3.5 text-blue-500" /> Photo
                 </button>
-                <button type="button" onClick={() => { setAttachMenuOpen(false); fileInputRef.current?.click(); }} className="flex items-center gap-2 w-full text-left px-4 py-2.5 text-sm text-foreground hover:bg-muted transition-colors border-t border-border">
-                  <FileText className="w-3.5 h-3.5 text-muted-foreground" /> File
+                <button type="button" onClick={() => { setAttachMenuOpen(false); fileInputRef.current?.click(); }} className="flex items-center gap-2.5 w-full text-left px-4 py-2.5 text-sm text-on-surface hover:bg-surface-container-low transition-colors border-t border-outline-variant/60">
+                  <FileText className="w-3.5 h-3.5 text-orange-500" /> File
                 </button>
               </div>
             </>
@@ -721,46 +645,38 @@ export default function ClubChatPage() {
           disabled={status !== "connected"}
           maxLength={2000}
           rows={1}
-          className="flex-1 px-4 py-2.5 text-sm rounded-2xl border border-input bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 resize-none max-h-32 overflow-y-auto"
+          className="flex-1 px-4 py-2.5 text-sm rounded-full border border-outline-variant bg-surface-container-low placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 resize-none max-h-32 overflow-y-auto text-on-surface"
           style={{ lineHeight: "1.4" }}
         />
         <button
           type="submit"
           disabled={!canSend}
-          className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center flex-shrink-0 disabled:opacity-40 hover:bg-primary/90 transition-colors mb-0.5"
+          className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 mb-0.5 transition-all duration-200 disabled:opacity-35"
+          style={{ backgroundColor: canSend ? IUS_BLUE : "#9ca3af" }}
         >
-          <Send className="w-4 h-4" />
+          <Send className="w-4 h-4 text-white" />
         </button>
       </form>
 
-      {/* Media sheet */}
-      {mediaOpen && (
+      {/* Media sheet — centered modal via portal */}
+      {mediaOpen && typeof document !== "undefined" && createPortal(
         <>
-          <div onClick={() => setMediaOpen(false)} className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100]" />
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-[600px] bg-white rounded-2xl z-[101] shadow-2xl max-h-[70vh] flex flex-col">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
-              <span className="font-semibold text-sm">Media &amp; Files</span>
-              <button onClick={() => setMediaOpen(false)} className="rounded-full p-1 hover:bg-muted text-muted-foreground transition-colors">
-                <X className="w-5 h-5" />
+          <div onClick={() => setMediaOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", backdropFilter: "blur(8px)", zIndex: 200 }} />
+          <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: "min(520px, 90vw)", maxHeight: "70vh", zIndex: 201, background: "white", borderRadius: 20, display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px 12px", borderBottom: "1px solid #e5e7eb", flexShrink: 0 }}>
+              <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>Media &amp; Files</span>
+              <button onClick={() => setMediaOpen(false)} style={{ width: 28, height: 28, borderRadius: "50%", border: "none", background: "#f3f4f6", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <X style={{ width: 14, height: 14 }} />
               </button>
             </div>
-            <MediaSheet
-              photos={mediaPhotos}
-              docs={mediaDocs}
-              onPreview={(urls, idx) => setLightbox({ urls, index: idx })}
-            />
+            <MediaSheet photos={mediaPhotos} docs={mediaDocs} onPreview={(urls, idx) => setLightbox({ urls, index: idx })} />
           </div>
-        </>
+        </>,
+        document.body
       )}
 
-      {/* Lightbox */}
       {lightbox && typeof document !== "undefined" && createPortal(
-        <LightboxPortal
-          urls={lightbox.urls}
-          index={lightbox.index}
-          onChange={(idx) => setLightbox((l) => l ? { ...l, index: idx } : null)}
-          onClose={() => setLightbox(null)}
-        />,
+        <LightboxPortal urls={lightbox.urls} index={lightbox.index} onChange={(idx) => setLightbox((l) => l ? { ...l, index: idx } : null)} onClose={() => setLightbox(null)} />,
         document.body
       )}
     </main>

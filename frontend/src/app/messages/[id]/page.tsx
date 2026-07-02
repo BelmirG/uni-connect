@@ -9,6 +9,8 @@ import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import MiniAvatar from "@/components/MiniAvatar";
 
+const IUS_BLUE = "#3865a6";
+
 interface Author {
   username: string | null;
   display_name: string;
@@ -73,8 +75,7 @@ function MsgAttachments({ attachments, isOwn, onPreview }: {
   if (!attachments.length) return null;
   const images = attachments.filter(a => a.mime_type.startsWith("image/"));
   const docs = attachments.filter(a => !a.mime_type.startsWith("image/"));
-  const isPdf = (a: FileAttachment) => a.mime_type === "application/pdf";
-  const isText = (a: FileAttachment) => a.mime_type === "text/plain";
+  const isInline = (a: FileAttachment) => a.mime_type === "application/pdf" || a.mime_type === "text/plain";
   const imageUrls = images.map(img => img.url);
 
   return (
@@ -87,8 +88,8 @@ function MsgAttachments({ attachments, isOwn, onPreview }: {
               src={a.url}
               alt={a.name}
               onClick={() => onPreview(imageUrls, i)}
-              className="rounded-lg object-cover cursor-zoom-in w-full"
-              style={{ maxHeight: 200 }}
+              className="rounded-xl object-cover cursor-zoom-in w-full"
+              style={{ maxHeight: 220 }}
             />
           ))}
         </div>
@@ -97,22 +98,16 @@ function MsgAttachments({ attachments, isOwn, onPreview }: {
         <a
           key={i}
           href={a.url}
-          {...(isPdf(a) || isText(a)
-            ? { target: "_blank", rel: "noopener noreferrer" }
-            : { download: a.name }
-          )}
+          {...(isInline(a) ? { target: "_blank", rel: "noopener noreferrer" } : { download: a.name })}
           className={cn(
             "flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs no-underline",
-            isOwn ? "bg-white/15 text-white hover:bg-white/25" : "bg-muted text-foreground hover:bg-muted/80"
+            isOwn ? "bg-white/15 text-white hover:bg-white/25" : "bg-surface-container text-on-surface hover:bg-surface-container-high"
           )}
         >
           <FileText className="w-3.5 h-3.5 flex-shrink-0 opacity-70" />
           <span className="flex-1 min-w-0 truncate font-medium">{a.name}</span>
           <span className="opacity-60 flex-shrink-0">{fmtSize(a.size)}</span>
-          {isPdf(a) || isText(a)
-            ? <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-60" />
-            : <Download className="w-3 h-3 flex-shrink-0 opacity-60" />
-          }
+          {isInline(a) ? <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-60" /> : <Download className="w-3 h-3 flex-shrink-0 opacity-60" />}
         </a>
       ))}
     </div>
@@ -131,22 +126,15 @@ function parseContent(content: string | null): { quote: string | null; body: str
 function SharedPostCard({ post, isOwn }: { post: SharedPost; isOwn: boolean }) {
   const isQA = post.post_type === "anonymous_qa";
   const href = isQA ? `/qa/${post.id}` : `/feed/${post.id}`;
-
   if (post.is_deleted) {
     return (
-      <div className={cn(
-        "mt-1.5 px-3 py-2 rounded-xl text-xs italic",
-        isOwn ? "bg-white/15 text-white/80" : "bg-muted text-muted-foreground"
-      )}>
+      <div className={cn("mt-1.5 px-3 py-2 rounded-xl text-xs italic", isOwn ? "bg-white/15 text-white/80" : "bg-surface-container text-on-surface-variant")}>
         [deleted post]
       </div>
     );
   }
   return (
-    <Link href={href} className={cn(
-      "mt-1.5 px-3 py-2 rounded-xl text-xs block no-underline",
-      isOwn ? "bg-white/15 text-white" : "bg-muted text-foreground"
-    )}>
+    <Link href={href} className={cn("mt-1.5 px-3 py-2 rounded-xl text-xs block no-underline border-l-2", isOwn ? "bg-white/15 text-white border-white/40" : "bg-surface-container text-on-surface border-primary/40")}>
       <p className="font-semibold mb-0.5">
         {post.author?.display_name ?? "Unknown"}
         {isQA && <span className="font-normal opacity-60 ml-1">· Anonymous Q&A</span>}
@@ -159,15 +147,7 @@ function SharedPostCard({ post, isOwn }: { post: SharedPost; isOwn: boolean }) {
 }
 
 function SwipeableMessage({
-  msg,
-  isOwn,
-  isHovered,
-  onSwipe,
-  onScrollToQuote,
-  onHoverEnter,
-  onHoverLeave,
-  onPreviewImage,
-  msgRef,
+  msg, isOwn, isHovered, onSwipe, onScrollToQuote, onHoverEnter, onHoverLeave, onPreviewImage, msgRef,
 }: {
   msg: DmMessage;
   isOwn: boolean;
@@ -192,7 +172,6 @@ function SwipeableMessage({
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-
     const ts = (e: TouchEvent) => {
       startX.current = e.touches[0].clientX;
       startY.current = e.touches[0].clientY;
@@ -200,7 +179,6 @@ function SwipeableMessage({
       offsetRef.current = 0;
       setOffset(0);
     };
-
     const tm = (e: TouchEvent) => {
       const dx = e.touches[0].clientX - startX.current;
       const dy = e.touches[0].clientY - startY.current;
@@ -216,13 +194,11 @@ function SwipeableMessage({
         setOffset(v);
       }
     };
-
     const te = () => {
       if (offsetRef.current >= 40) onSwipeRef.current(msg);
       offsetRef.current = 0;
       setOffset(0);
     };
-
     el.addEventListener("touchstart", ts, { passive: true });
     el.addEventListener("touchmove", tm, { passive: false });
     el.addEventListener("touchend", te);
@@ -251,26 +227,26 @@ function SwipeableMessage({
 
       <div
         className={cn(
-          "max-w-[72%] px-3.5 py-2 text-sm leading-snug flex flex-col",
+          "max-w-[72%] px-3.5 py-2.5 text-sm leading-snug flex flex-col shadow-sm",
           isOwn
-            ? "bg-primary text-primary-foreground rounded-2xl rounded-br-sm"
-            : "bg-white border border-border text-foreground rounded-2xl rounded-bl-sm"
+            ? "text-white rounded-2xl rounded-br-sm"
+            : "bg-surface border border-outline-variant text-on-surface rounded-2xl rounded-bl-sm"
         )}
         style={{
+          backgroundColor: isOwn ? IUS_BLUE : undefined,
           transform: `translateX(${offset}px)`,
-          transition: offset === 0 ? "transform 0.2s ease" : "none",
+          transition: offset === 0 ? "transform 0.22s cubic-bezier(0.34,1.56,0.64,1)" : "none",
         }}
       >
         {quote && (
           <button
             onClick={() => onScrollToQuote(quote)}
             className={cn(
-              "text-left text-xs px-2.5 py-1.5 rounded-lg mb-2 border-l-2 w-full cursor-pointer",
+              "text-left text-xs px-2.5 py-1.5 rounded-lg mb-2 border-l-2 w-full cursor-pointer transition-colors",
               isOwn
-                ? "bg-white/15 border-white/50 text-white/80 hover:bg-white/25"
-                : "bg-muted border-primary/50 text-muted-foreground hover:bg-muted/80"
+                ? "bg-white/15 border-white/40 text-white/80 hover:bg-white/25"
+                : "bg-surface-container border-primary/40 text-on-surface-variant hover:bg-surface-container-high"
             )}
-            style={{ transition: "background 0.1s" }}
           >
             <span className="line-clamp-2 break-words">{quote}</span>
           </button>
@@ -281,17 +257,16 @@ function SwipeableMessage({
         )}
         {msg.shared_post && <SharedPostCard post={msg.shared_post} isOwn={isOwn} />}
         <span className={cn(
-          "text-[10px] self-end mt-1 ml-2 flex-shrink-0",
-          isOwn ? "text-primary-foreground/50" : "text-muted-foreground"
+          "text-[10px] self-end mt-1.5 ml-2 flex-shrink-0",
+          isOwn ? "text-white/45" : "text-on-surface-variant"
         )}>
           {timeLabel(msg.created_at)}
         </span>
       </div>
 
-      {/* Reply button: visible on hover (desktop) or swipe (mobile) */}
       <button
         onClick={() => { onHoverLeave(); onSwipeRef.current(msg); }}
-        className="flex-shrink-0 self-center p-1 rounded-full text-muted-foreground"
+        className="flex-shrink-0 self-center p-1 rounded-full text-on-surface-variant"
         style={{
           opacity: replyBtnOpacity,
           transition: offset === 0 ? "opacity 0.15s" : "none",
@@ -322,60 +297,29 @@ function LightboxPortal({ urls, index, onChange, onClose }: {
   }, [index, urls.length, onChange, onClose]);
 
   return (
-    <div
-      onClick={onClose}
-      style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center" }}
-    >
-      <img
-        src={urls[index]}
-        alt="Preview"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: "90vw", maxHeight: "90vh", objectFit: "contain", borderRadius: 8 }}
-      />
-
-      {/* Prev */}
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <img src={urls[index]} alt="Preview" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "90vw", maxHeight: "90vh", objectFit: "contain", borderRadius: 10 }} />
       {index > 0 && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onChange(index - 1); }}
-          style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
-        >
+        <button onClick={(e) => { e.stopPropagation(); onChange(index - 1); }} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <ChevronLeft style={{ width: 20, height: 20 }} />
         </button>
       )}
-
-      {/* Next */}
       {index < urls.length - 1 && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onChange(index + 1); }}
-          style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
-        >
+        <button onClick={(e) => { e.stopPropagation(); onChange(index + 1); }} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <ChevronRight style={{ width: 20, height: 20 }} />
         </button>
       )}
-
-      {/* Counter */}
       {urls.length > 1 && (
         <div style={{ position: "absolute", top: 16, left: "50%", transform: "translateX(-50%)", background: "rgba(0,0,0,0.5)", color: "#fff", fontSize: "0.75rem", padding: "4px 10px", borderRadius: 20 }}>
           {index + 1} / {urls.length}
         </div>
       )}
-
-      {/* Close */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onClose(); }}
-        style={{ position: "absolute", top: 16, right: 16, width: 36, height: 36, borderRadius: "50%", background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", fontSize: "1.2rem", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
-      >×</button>
+      <button onClick={(e) => { e.stopPropagation(); onClose(); }} style={{ position: "absolute", top: 16, right: 16, width: 36, height: 36, borderRadius: "50%", background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", fontSize: "1.2rem", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
     </div>
   );
 }
 
-function MediaSheet({
-  photos,
-  docs,
-  isPdf,
-  isText,
-  onPreview,
-}: {
+function MediaSheet({ photos, docs, isPdf, isText, onPreview }: {
   photos: FileAttachment[];
   docs: FileAttachment[];
   isPdf: (a: FileAttachment) => boolean;
@@ -385,68 +329,38 @@ function MediaSheet({
   const [tab, setTab] = useState<"media" | "docs">("media");
   return (
     <>
-      {/* Tab bar */}
-      <div className="flex border-b border-border flex-shrink-0">
+      <div className="flex border-b border-outline-variant flex-shrink-0">
         {(["media", "docs"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={cn(
-              "flex-1 py-2.5 text-sm font-semibold transition-colors relative",
-              tab === t ? "text-foreground" : "text-muted-foreground hover:text-foreground"
-            )}
-          >
+          <button key={t} onClick={() => setTab(t)} className={cn("flex-1 py-2.5 text-sm font-medium transition-colors relative", tab === t ? "text-on-surface" : "text-on-surface-variant hover:text-on-surface")}>
             {t === "media" ? "Media" : "Docs"}
-            {tab === t && (
-              <span className="absolute bottom-0 left-1/4 right-1/4 h-0.5 bg-primary rounded-full" />
-            )}
+            {tab === t && <span className="absolute bottom-0 left-1/4 right-1/4 h-0.5 bg-on-surface rounded-full" />}
           </button>
         ))}
       </div>
-
-      {/* Tab content */}
       <div className="overflow-y-auto flex-1 p-4">
         {tab === "media" && (
           photos.length === 0
-            ? <p className="text-sm text-muted-foreground text-center py-10">No photos yet.</p>
+            ? <p className="text-sm text-on-surface-variant text-center py-10">No photos yet.</p>
             : <div className="grid grid-cols-7 gap-0.5">
                 {photos.map((a, i) => (
-                  <img
-                    key={i}
-                    src={a.url}
-                    alt={a.name}
-                    onClick={() => onPreview(photos.map(p => p.url), i)}
-                    className="aspect-square object-cover rounded-sm cursor-zoom-in w-full"
-                  />
+                  <img key={i} src={a.url} alt={a.name} onClick={() => onPreview(photos.map(p => p.url), i)} className="aspect-square object-cover rounded-sm cursor-zoom-in w-full" />
                 ))}
               </div>
         )}
-
         {tab === "docs" && (
           docs.length === 0
-            ? <p className="text-sm text-muted-foreground text-center py-10">No files yet.</p>
-            : <div className="space-y-2 mx-4">
+            ? <p className="text-sm text-on-surface-variant text-center py-10">No files yet.</p>
+            : <div className="space-y-2">
                 {docs.map((a, i) => (
-                  <a
-                    key={i}
-                    href={a.url}
-                    {...(isPdf(a) || isText(a)
-                      ? { target: "_blank", rel: "noopener noreferrer" }
-                      : { download: a.name }
-                    )}
-                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-border bg-muted/40 hover:bg-muted transition-colors no-underline group"
+                  <a key={i} href={a.url} {...(isPdf(a) || isText(a) ? { target: "_blank", rel: "noopener noreferrer" } : { download: a.name })}
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-outline-variant bg-surface-container-low hover:bg-surface-container transition-colors no-underline group"
                   >
-                    <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                    <FileText className="w-4 h-4 text-on-surface-variant flex-shrink-0" />
                     <span className="flex-1 min-w-0">
-                      <span className="block text-sm font-medium text-foreground truncate">{a.name}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {fmtSize(a.size)}{isPdf(a) || isText(a) ? " · Opens in browser" : " · Click to download"}
-                      </span>
+                      <span className="block text-sm font-medium text-on-surface truncate">{a.name}</span>
+                      <span className="text-xs text-on-surface-variant">{fmtSize(a.size)}{isPdf(a) || isText(a) ? " · Opens in browser" : " · Click to download"}</span>
                     </span>
-                    {isPdf(a) || isText(a)
-                      ? <ExternalLink className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground flex-shrink-0" />
-                      : <Download className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground flex-shrink-0" />
-                    }
+                    {isPdf(a) || isText(a) ? <ExternalLink className="w-3.5 h-3.5 text-on-surface-variant group-hover:text-on-surface flex-shrink-0" /> : <Download className="w-3.5 h-3.5 text-on-surface-variant group-hover:text-on-surface flex-shrink-0" />}
                   </a>
                 ))}
               </div>
@@ -473,8 +387,9 @@ export default function ConversationPage() {
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
   const [mediaOpen, setMediaOpen] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
 
-  const closeMenuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -484,15 +399,10 @@ export default function ConversationPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
-  useEffect(() => () => { if (closeMenuTimerRef.current) clearTimeout(closeMenuTimerRef.current); }, []);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
   useEffect(() => {
     let cancelled = false;
-
     async function init() {
       try {
         const [conv, me] = await Promise.all([
@@ -510,7 +420,6 @@ export default function ConversationPage() {
         return;
       }
       if (cancelled) return;
-
       const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(`${proto}//${window.location.host}/api/messages/${id}/ws`);
       wsRef.current = ws;
@@ -528,28 +437,18 @@ export default function ConversationPage() {
       ws.onclose = () => setStatus("disconnected");
       ws.onerror = () => setStatus("disconnected");
     }
-
     init();
-    return () => {
-      cancelled = true;
-      wsRef.current?.close();
-      wsRef.current = null;
-    };
+    return () => { cancelled = true; wsRef.current?.close(); wsRef.current = null; };
   }, [id, router]);
 
   function scrollToQuote(quote: string) {
-    const all = messagesRef.current;
-    const target = all.find((m) => {
-      if (!m.content) return false;
-      return m.content === quote || m.content.startsWith(quote);
-    });
+    const target = messagesRef.current.find((m) => m.content === quote || (m.content ?? "").startsWith(quote));
     if (!target) return;
     const el = msgRefs.current.get(target.id);
     if (!el) return;
     el.scrollIntoView({ behavior: "smooth", block: "center" });
-    // Flash highlight via direct DOM (instant on, slow fade off)
     el.style.transition = "none";
-    el.style.backgroundColor = "rgba(59,130,246,0.15)";
+    el.style.backgroundColor = "rgba(56,101,166,0.12)";
     el.style.borderRadius = "12px";
     requestAnimationFrame(() => requestAnimationFrame(() => {
       el.style.transition = "background-color 1.3s ease, border-radius 1.3s ease";
@@ -575,65 +474,35 @@ export default function ConversationPage() {
     if (e.target) e.target.value = "";
     if (!files.length) return;
     setAttachMenuOpen(false);
-
     const newPending: PendingAttachment[] = files.map((f) => ({
       uid: crypto.randomUUID(),
       localUrl: f.type.startsWith("image/") ? URL.createObjectURL(f) : undefined,
-      attachment: null,
-      uploading: true,
-      error: null,
-      name: f.name,
-      mime_type: f.type,
+      attachment: null, uploading: true, error: null, name: f.name, mime_type: f.type,
     }));
     setPendingAttachments((prev) => [...prev, ...newPending]);
-
-    await Promise.all(
-      files.map(async (file, i) => {
-        const uid = newPending[i].uid;
-        try {
-          const raw = await uploadFile(file, endpoint);
-          // The image endpoint only returns {url}. Enrich with file metadata so
-          // mime_type is available for correct rendering in the chat bubble.
-          const attachment: FileAttachment = {
-            url: raw.url,
-            name: raw.name ?? file.name,
-            size: raw.size ?? file.size,
-            mime_type: raw.mime_type ?? file.type,
-          };
-          setPendingAttachments((prev) =>
-            prev.map((a) => a.uid === uid ? { ...a, attachment, uploading: false } : a)
-          );
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : "Upload failed";
-          setPendingAttachments((prev) =>
-            prev.map((a) => a.uid === uid ? { ...a, uploading: false, error: msg } : a)
-          );
-        }
-      })
-    );
+    await Promise.all(files.map(async (file, i) => {
+      const uid = newPending[i].uid;
+      try {
+        const raw = await uploadFile(file, endpoint);
+        const attachment: FileAttachment = { url: raw.url, name: raw.name ?? file.name, size: raw.size ?? file.size, mime_type: raw.mime_type ?? file.type };
+        setPendingAttachments((prev) => prev.map((a) => a.uid === uid ? { ...a, attachment, uploading: false } : a));
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Upload failed";
+        setPendingAttachments((prev) => prev.map((a) => a.uid === uid ? { ...a, uploading: false, error: msg } : a));
+      }
+    }));
   }
 
-  function removePending(uid: string) {
-    setPendingAttachments((prev) => prev.filter((a) => a.uid !== uid));
-  }
+  function removePending(uid: string) { setPendingAttachments((prev) => prev.filter((a) => a.uid !== uid)); }
 
   function send() {
     const text = input.trim();
-    const readyAttachments = pendingAttachments
-      .filter((a) => a.attachment !== null)
-      .map((a) => a.attachment!);
+    const readyAttachments = pendingAttachments.filter((a) => a.attachment !== null).map((a) => a.attachment!);
     const stillUploading = pendingAttachments.some((a) => a.uploading);
-
     if ((!text && readyAttachments.length === 0) || stillUploading || status !== "connected" || !wsRef.current) return;
-
     const wsPayload: Record<string, unknown> = {};
-    if (text) {
-      wsPayload.content = replyTo
-        ? `> ${(replyTo.content ?? "[post]").slice(0, 80)}\n\n${text}`
-        : text;
-    }
+    if (text) wsPayload.content = replyTo ? `> ${(replyTo.content ?? "[post]").slice(0, 80)}\n\n${text}` : text;
     if (readyAttachments.length > 0) wsPayload.attachments = readyAttachments;
-
     wsRef.current.send(JSON.stringify(wsPayload));
     setInput("");
     setReplyTo(null);
@@ -642,31 +511,12 @@ export default function ConversationPage() {
   }
 
   function handleSubmit(e: React.FormEvent) { e.preventDefault(); send(); }
-
-  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
-  }
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }
 
   function handleToggleMute() {
     const newMuted = !isMuted;
     setIsMuted(newMuted);
-    apiFetch(`/api/messages/${id}/mute`, { method: newMuted ? "POST" : "DELETE" }).catch(() => {
-      setIsMuted(!newMuted);
-    });
-  }
-
-  function handleMenuMouseEnter() {
-    if (closeMenuTimerRef.current) {
-      clearTimeout(closeMenuTimerRef.current);
-      closeMenuTimerRef.current = null;
-    }
-  }
-
-  function handleMenuMouseLeave() {
-    closeMenuTimerRef.current = setTimeout(() => {
-      setMenuOpen(false);
-      closeMenuTimerRef.current = null;
-    }, 200);
+    apiFetch(`/api/messages/${id}/mute`, { method: newMuted ? "POST" : "DELETE" }).catch(() => setIsMuted(!newMuted));
   }
 
   async function handleDeleteConversation() {
@@ -680,70 +530,77 @@ export default function ConversationPage() {
     }
   }
 
+  const canSend = status === "connected" && (input.trim().length > 0 || (pendingAttachments.some((a) => a.attachment !== null) && !pendingAttachments.some((a) => a.uploading)));
+
   return (
-    <main className="fixed top-0 bottom-[60px] left-1/2 -translate-x-1/2 w-full max-w-[700px] flex flex-col bg-background">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-white flex-shrink-0">
-        <Link href="/messages" className="flex items-center text-muted-foreground hover:text-foreground transition-colors no-underline flex-shrink-0">
-          <ArrowLeft className="w-4 h-4" />
+    <main className="flex flex-col bg-background max-w-[700px] w-full mx-auto overflow-hidden" style={{ height: "100svh" }}>
+
+      {/* Header — glass */}
+      <div
+        className="flex items-center gap-3 px-4 py-3 flex-shrink-0 border-b border-outline-variant/50"
+        style={{ background: "rgba(255,255,255,0.88)", backdropFilter: "blur(20px) saturate(160%)", WebkitBackdropFilter: "blur(20px) saturate(160%)" }}
+      >
+        <Link href="/messages" className="flex items-center text-on-surface-variant hover:text-on-surface transition-colors no-underline flex-shrink-0">
+          <ArrowLeft className="w-5 h-5" />
         </Link>
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          {otherUser && <MiniAvatar name={otherUser.display_name} url={otherUser.avatar_url ?? null} size={32} />}
-          <span className="font-semibold text-sm text-foreground truncate">
-            {otherUser?.display_name ?? "Conversation"}
-          </span>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <div className="flex items-center gap-1.5 text-xs">
-            <span className={cn("w-2 h-2 rounded-full", status === "connected" ? "bg-green-500" : status === "connecting" ? "bg-yellow-400" : "bg-destructive")} />
-            <span className="text-muted-foreground">
-              {status === "connected" ? "Live" : status === "connecting" ? "Connecting…" : "Disconnected"}
-            </span>
+        <div className="flex items-center gap-2.5 flex-1 min-w-0">
+          {otherUser && <MiniAvatar name={otherUser.display_name} url={otherUser.avatar_url ?? null} size={34} />}
+          <div className="min-w-0">
+            <p className="font-semibold text-sm text-on-surface truncate leading-tight">{otherUser?.display_name ?? "Conversation"}</p>
+            <p className="text-[11px] text-on-surface-variant flex items-center gap-1 leading-tight">
+              <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", status === "connected" ? "bg-green-500" : status === "connecting" ? "bg-yellow-400" : "bg-destructive")} />
+              {status === "connected" ? "Online" : status === "connecting" ? "Connecting…" : "Offline"}
+            </p>
           </div>
-          <div className="relative" onMouseEnter={handleMenuMouseEnter} onMouseLeave={handleMenuMouseLeave}>
-            <button onClick={() => setMenuOpen((o) => !o)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors">
-              <MoreVertical className="w-4 h-4" />
-            </button>
-            {menuOpen && (
-              <div className="absolute right-0 top-full bg-white border border-border rounded-xl shadow-lg min-w-[180px] z-[200] overflow-hidden">
-                <button
-                  onClick={() => { setMenuOpen(false); setMediaOpen(true); }}
-                  className="flex items-center gap-2 w-full text-left px-4 py-2.5 text-sm text-foreground hover:bg-muted transition-colors"
-                >
-                  <GalleryHorizontalEnd className="w-3.5 h-3.5" />
-                  Media
+        </div>
+        <div className="relative flex-shrink-0">
+          <button
+            ref={menuBtnRef}
+            onClick={() => {
+              if (menuOpen) { setMenuOpen(false); return; }
+              const rect = menuBtnRef.current?.getBoundingClientRect();
+              if (rect) setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+              setMenuOpen(true);
+            }}
+            className="p-2 rounded-full hover:bg-surface-container text-on-surface-variant transition-colors"
+          >
+            <MoreVertical className="w-4 h-4" />
+          </button>
+          {menuOpen && menuPos && typeof document !== "undefined" && createPortal(
+            <>
+              <div onClick={() => setMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 299 }} />
+              <div style={{ position: "fixed", top: menuPos.top, right: menuPos.right, zIndex: 300, background: "white", border: "1px solid var(--outline-variant, #e0e0e0)", borderRadius: 16, boxShadow: "0 4px 24px rgba(0,0,0,0.12)", minWidth: 190, overflow: "hidden" }}>
+                <button onClick={() => { setMenuOpen(false); setMediaOpen(true); }} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "10px 16px", fontSize: "0.875rem", background: "none", border: "none", cursor: "pointer" }} onMouseEnter={e => (e.currentTarget.style.background = "#f5f5f5")} onMouseLeave={e => (e.currentTarget.style.background = "none")}>
+                  <GalleryHorizontalEnd style={{ width: 14, height: 14, color: "#6b7280", flexShrink: 0 }} />
+                  Media &amp; Files
                 </button>
-                <div className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-foreground border-t border-border">
-                  <Bell className="w-3.5 h-3.5 flex-shrink-0" />
-                  <span className="flex-1 select-none">Notifications</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", fontSize: "0.875rem", borderTop: "1px solid rgba(0,0,0,0.06)" }}>
+                  <Bell style={{ width: 14, height: 14, color: "#6b7280", flexShrink: 0 }} />
+                  <span style={{ flex: 1, userSelect: "none" }}>Notifications</span>
                   <div
                     onClick={handleToggleMute}
                     role="switch"
                     aria-checked={!isMuted}
-                    className={`relative cursor-pointer inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors duration-500 ${isMuted ? "bg-orange-400" : "bg-green-500"}`}
+                    style={{ position: "relative", cursor: "pointer", display: "inline-flex", width: 36, height: 20, flexShrink: 0, alignItems: "center", borderRadius: 9999, background: isMuted ? "#fb923c" : "#22c55e", transition: "background 0.3s" }}
                   >
-                    <span
-                      className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform duration-500 ease-in-out ${isMuted ? "translate-x-1" : "translate-x-[18px]"}`}
-                    />
+                    <span style={{ display: "inline-block", width: 14, height: 14, borderRadius: "50%", background: "white", boxShadow: "0 1px 2px rgba(0,0,0,0.2)", transition: "transform 0.3s", transform: isMuted ? "translateX(3px)" : "translateX(19px)" }} />
                   </div>
                 </div>
-                <button onClick={handleDeleteConversation} className="flex items-center gap-2 w-full text-left px-4 py-2.5 text-sm text-destructive hover:bg-destructive/5 transition-colors border-t border-border">
-                  <Trash2 className="w-3.5 h-3.5" />
+                <button onClick={handleDeleteConversation} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "10px 16px", fontSize: "0.875rem", background: "none", border: "none", borderTop: "1px solid rgba(0,0,0,0.06)", cursor: "pointer", color: "#ef4444" }} onMouseEnter={e => (e.currentTarget.style.background = "#fef2f2")} onMouseLeave={e => (e.currentTarget.style.background = "none")}>
+                  <Trash2 style={{ width: 14, height: 14, flexShrink: 0 }} />
                   Delete chat
                 </button>
               </div>
-            )}
-          </div>
+            </>,
+            document.body
+          )}
         </div>
       </div>
 
       {/* Messages */}
-      <div
-        className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-2 bg-muted/30"
-        onScroll={() => setHoveredMsgId(null)}
-      >
+      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-2" onScroll={() => setHoveredMsgId(null)}>
         {messages.length === 0 && status === "connected" && (
-          <p className="text-muted-foreground text-sm text-center m-auto">No messages yet. Say hello!</p>
+          <p className="text-on-surface-variant text-sm text-center m-auto">No messages yet. Say hello!</p>
         )}
         {messages.map((msg) => (
           <SwipeableMessage
@@ -756,62 +613,42 @@ export default function ConversationPage() {
             onSwipe={(m) => { setHoveredMsgId(null); setReplyTo(m); setTimeout(() => inputRef.current?.focus(), 50); }}
             onScrollToQuote={scrollToQuote}
             onPreviewImage={(urls, idx) => setLightbox({ urls, index: idx })}
-            msgRef={(el) => {
-              if (el) msgRefs.current.set(msg.id, el);
-              else msgRefs.current.delete(msg.id);
-            }}
+            msgRef={(el) => { if (el) msgRefs.current.set(msg.id, el); else msgRefs.current.delete(msg.id); }}
           />
         ))}
         <div ref={bottomRef} />
       </div>
 
-      {/* Reply preview */}
+      {/* Reply strip */}
       {replyTo && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-muted/60 border-t border-border flex-shrink-0">
-          <CornerUpLeft className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-          <p className="flex-1 text-xs text-muted-foreground truncate">
-            <span className="font-medium text-foreground">{replyTo.sender.display_name}:</span>{" "}
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-surface-container-low border-t border-outline-variant/60 flex-shrink-0">
+          <CornerUpLeft className="w-3.5 h-3.5 flex-shrink-0" style={{ color: IUS_BLUE }} />
+          <p className="flex-1 text-xs text-on-surface-variant truncate">
+            <span className="font-semibold text-on-surface">{replyTo.sender.display_name}:</span>{" "}
             {(replyTo.content ?? "[post]").slice(0, 80)}
           </p>
-          <button onClick={() => setReplyTo(null)} className="text-muted-foreground hover:text-foreground transition-colors">
+          <button onClick={() => setReplyTo(null)} className="text-on-surface-variant hover:text-on-surface transition-colors">
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
-      {/* Pending attachments preview */}
+      {/* Pending attachments */}
       {pendingAttachments.length > 0 && (
-        <div className="flex items-center gap-2 px-4 py-2 border-t border-border bg-white flex-shrink-0 flex-wrap">
+        <div className="flex items-center gap-2 px-4 py-2.5 border-t border-outline-variant/60 bg-surface flex-shrink-0 flex-wrap">
           {pendingAttachments.map((p) => (
             <div key={p.uid} className="relative flex-shrink-0">
               {p.localUrl ? (
-                <img
-                  src={p.localUrl}
-                  alt={p.name}
-                  onClick={() => !p.uploading && setLightbox({ urls: [p.localUrl!], index: 0 })}
-                  className="w-14 h-14 rounded-lg object-cover border border-border cursor-zoom-in"
-                />
+                <img src={p.localUrl} alt={p.name} onClick={() => !p.uploading && setLightbox({ urls: [p.localUrl!], index: 0 })} className="w-14 h-14 rounded-xl object-cover border border-outline-variant cursor-zoom-in" />
               ) : (
-                <div className="flex items-center gap-1.5 bg-muted rounded-lg px-2.5 py-1.5 text-xs max-w-[140px]">
-                  <FileText className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground" />
-                  <span className="truncate text-foreground">{p.name}</span>
+                <div className="flex items-center gap-1.5 bg-surface-container rounded-xl px-2.5 py-1.5 text-xs max-w-[140px]">
+                  <FileText className="w-3.5 h-3.5 flex-shrink-0 text-on-surface-variant" />
+                  <span className="truncate text-on-surface">{p.name}</span>
                 </div>
               )}
-              {p.uploading && (
-                <div className="absolute inset-0 rounded-lg bg-black/40 flex items-center justify-center">
-                  <span className="text-[10px] text-white">…</span>
-                </div>
-              )}
-              {p.error && (
-                <div className="absolute inset-0 rounded-lg bg-destructive/30 flex items-center justify-center">
-                  <span className="text-[10px] text-destructive font-semibold">!</span>
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={() => removePending(p.uid)}
-                className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-foreground text-background flex items-center justify-center"
-              >
+              {p.uploading && <div className="absolute inset-0 rounded-xl bg-black/35 flex items-center justify-center"><span className="text-[10px] text-white">…</span></div>}
+              {p.error && <div className="absolute inset-0 rounded-xl bg-destructive/30 flex items-center justify-center"><span className="text-[10px] text-destructive font-semibold">!</span></div>}
+              <button type="button" onClick={() => removePending(p.uid)} className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-on-surface text-background flex items-center justify-center">
                 <X className="w-2.5 h-2.5" />
               </button>
             </div>
@@ -819,53 +656,34 @@ export default function ConversationPage() {
         </div>
       )}
 
-      {/* Input */}
-      <form onSubmit={handleSubmit} className="flex items-end gap-2 px-3 py-3 border-t border-border bg-white flex-shrink-0">
-        {/* Hidden file inputs */}
-        <input
-          ref={photoInputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/gif,image/webp"
-          multiple
-          className="hidden"
-          onChange={(e) => handleMediaSelect(e, "/api/upload")}
-        />
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,.txt,.md,.csv,.py,.js,.ts,.jsx,.tsx,.java,.c,.cpp,.h,.cs,.go,.rs,.rb,.php,.json,.yaml,.yml,.toml,.xml,.sh,.sql,.r,.ipynb"
-          multiple
-          className="hidden"
-          onChange={(e) => handleMediaSelect(e, "/api/upload/file")}
-        />
+      {/* Input bar — glass */}
+      <form
+        onSubmit={handleSubmit}
+        className="flex items-end gap-2.5 px-3 py-3 border-t border-outline-variant/50 flex-shrink-0"
+        style={{ background: "rgba(255,255,255,0.92)", backdropFilter: "blur(20px) saturate(160%)", WebkitBackdropFilter: "blur(20px) saturate(160%)" }}
+      >
+        <input ref={photoInputRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple className="hidden" onChange={(e) => handleMediaSelect(e, "/api/upload")} />
+        <input ref={fileInputRef} type="file" accept="application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,.txt,.md,.csv,.py,.js,.ts,.jsx,.tsx,.java,.c,.cpp,.h,.cs,.go,.rs,.rb,.php,.json,.yaml,.yml,.toml,.xml,.sh,.sql,.r,.ipynb" multiple className="hidden" onChange={(e) => handleMediaSelect(e, "/api/upload/file")} />
 
-        {/* + button with attach menu */}
+        {/* Attach button */}
         <div className="relative flex-shrink-0 mb-0.5">
           <button
             type="button"
             onClick={() => setAttachMenuOpen((o) => !o)}
             disabled={status !== "connected" || pendingAttachments.length >= 5}
-            className="w-10 h-10 rounded-full border border-input bg-background flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors disabled:opacity-40"
+            className="w-9 h-9 rounded-full bg-surface border border-outline-variant flex items-center justify-center text-on-surface-variant hover:bg-surface-container transition-colors disabled:opacity-40"
           >
             <Plus className="w-4 h-4" />
           </button>
           {attachMenuOpen && (
             <>
               <div onClick={() => setAttachMenuOpen(false)} className="fixed inset-0 z-[198]" />
-              <div className="absolute bottom-[calc(100%+6px)] left-0 bg-white border border-border rounded-xl shadow-lg z-[199] overflow-hidden min-w-[140px]">
-                <button
-                  type="button"
-                  onClick={() => photoInputRef.current?.click()}
-                  className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-foreground hover:bg-muted transition-colors"
-                >
+              <div className="absolute bottom-[calc(100%+6px)] left-0 bg-surface border border-outline-variant rounded-2xl shadow-xl z-[199] overflow-hidden min-w-[140px]">
+                <button type="button" onClick={() => photoInputRef.current?.click()} className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-on-surface hover:bg-surface-container-low transition-colors">
                   <ImageIcon className="w-4 h-4 text-blue-500" />
                   Photo
                 </button>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-foreground hover:bg-muted transition-colors border-t border-border"
-                >
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-on-surface hover:bg-surface-container-low transition-colors border-t border-outline-variant/60">
                   <FileText className="w-4 h-4 text-orange-500" />
                   File
                 </button>
@@ -883,62 +701,47 @@ export default function ConversationPage() {
           disabled={status !== "connected"}
           maxLength={2000}
           rows={1}
-          className="flex-1 px-4 py-2.5 text-sm rounded-2xl border border-input bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 resize-none max-h-32 overflow-y-auto"
+          className="flex-1 px-4 py-2.5 text-sm rounded-full border border-outline-variant bg-surface-container-low placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 resize-none max-h-32 overflow-y-auto text-on-surface"
           style={{ lineHeight: "1.4" }}
         />
         <button
           type="submit"
-          disabled={
-            status !== "connected" ||
-            pendingAttachments.some((a) => a.uploading) ||
-            (!input.trim() && !pendingAttachments.some((a) => a.attachment))
-          }
-          className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center flex-shrink-0 disabled:opacity-40 hover:bg-primary/90 transition-colors mb-0.5"
+          disabled={!canSend}
+          className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 mb-0.5 transition-all duration-200 disabled:opacity-35"
+          style={{ backgroundColor: canSend ? IUS_BLUE : "#9ca3af" }}
         >
-          <Send className="w-4 h-4" />
+          <Send className="w-4 h-4 text-white" />
         </button>
       </form>
 
-      {/* Media sheet */}
-      {mediaOpen && (() => {
-        const allAttachments = messages.flatMap((m) => m.attachments ?? []);
-        const photos = allAttachments.filter((a) => a.mime_type.startsWith("image/"));
-        const docs = allAttachments.filter((a) => !a.mime_type.startsWith("image/"));
-        const isPdf = (a: FileAttachment) => a.mime_type === "application/pdf";
-        const isText = (a: FileAttachment) => a.mime_type === "text/plain";
-        return (
-          <>
-            <div onClick={() => setMediaOpen(false)} className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100]" />
-            <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-[600px] bg-white rounded-2xl z-[101] shadow-2xl max-h-[70vh] flex flex-col">
-              {/* Header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
-                <span className="font-semibold text-sm">Media &amp; Files</span>
-                <button onClick={() => setMediaOpen(false)} className="rounded-full p-1 hover:bg-muted text-muted-foreground transition-colors">
-                  <X className="w-5 h-5" />
-                </button>
+      {/* Media sheet — centered modal via portal */}
+      {mediaOpen && typeof document !== "undefined" && createPortal(
+        (() => {
+          const allAttachments = messages.flatMap((m) => m.attachments ?? []);
+          const photos = allAttachments.filter((a) => a.mime_type.startsWith("image/"));
+          const docs = allAttachments.filter((a) => !a.mime_type.startsWith("image/"));
+          const isPdf = (a: FileAttachment) => a.mime_type === "application/pdf";
+          const isText = (a: FileAttachment) => a.mime_type === "text/plain";
+          return (
+            <>
+              <div onClick={() => setMediaOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", backdropFilter: "blur(8px)", zIndex: 200 }} />
+              <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: "min(520px, 90vw)", maxHeight: "70vh", zIndex: 201, background: "white", borderRadius: 20, display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px 12px", borderBottom: "1px solid #e5e7eb", flexShrink: 0 }}>
+                  <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>Media &amp; Files</span>
+                  <button onClick={() => setMediaOpen(false)} style={{ width: 28, height: 28, borderRadius: "50%", border: "none", background: "#f3f4f6", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <X style={{ width: 14, height: 14 }} />
+                  </button>
+                </div>
+                <MediaSheet photos={photos} docs={docs} isPdf={isPdf} isText={isText} onPreview={(urls, idx) => setLightbox({ urls, index: idx })} />
               </div>
+            </>
+          );
+        })(),
+        document.body
+      )}
 
-              {/* Tabs */}
-              <MediaSheet
-                photos={photos}
-                docs={docs}
-                isPdf={isPdf}
-                isText={isText}
-                onPreview={(urls, idx) => setLightbox({ urls, index: idx })}
-              />
-            </div>
-          </>
-        );
-      })()}
-
-      {/* Image lightbox portal */}
       {lightbox && createPortal(
-        <LightboxPortal
-          urls={lightbox.urls}
-          index={lightbox.index}
-          onChange={(idx) => setLightbox((l) => l ? { ...l, index: idx } : null)}
-          onClose={() => setLightbox(null)}
-        />,
+        <LightboxPortal urls={lightbox.urls} index={lightbox.index} onChange={(idx) => setLightbox((l) => l ? { ...l, index: idx } : null)} onClose={() => setLightbox(null)} />,
         document.body
       )}
     </main>

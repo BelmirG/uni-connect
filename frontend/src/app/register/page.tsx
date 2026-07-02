@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Eye, EyeOff, GraduationCap, Mail, CheckCircle } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ interface FormState {
 }
 
 export default function RegisterPage() {
+  const router = useRouter();
   const [form, setForm] = useState<FormState>({
     email: "",
     username: "",
@@ -27,6 +29,13 @@ export default function RegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Already signed in? Skip the form and go straight to the feed.
+  useEffect(() => {
+    apiFetch("/api/auth/me")
+      .then(() => router.replace("/feed"))
+      .catch(() => {});
+  }, [router]);
 
   function update(field: keyof FormState) {
     return (e: React.ChangeEvent<HTMLInputElement>) =>

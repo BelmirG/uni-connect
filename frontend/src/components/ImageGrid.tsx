@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 function Lightbox({ urls, startIndex, onClose }: { urls: string[]; startIndex: number; onClose: () => void }) {
   const [idx, setIdx] = useState(startIndex);
@@ -98,8 +99,9 @@ export function ImageGrid({ urls }: { urls: string[] }) {
             style={{ width: "100%", maxHeight: 500, objectFit: "cover", display: "block" }}
           />
         </div>
-        {lightboxIndex !== null && (
-          <Lightbox urls={urls} startIndex={lightboxIndex} onClose={() => setLightboxIndex(null)} />
+        {lightboxIndex !== null && createPortal(
+          <Lightbox urls={urls} startIndex={lightboxIndex} onClose={() => setLightboxIndex(null)} />,
+          document.body
         )}
       </>
     );
@@ -156,8 +158,9 @@ export function ImageGrid({ urls }: { urls: string[] }) {
         </div>
       </div>
 
-      {lightboxIndex !== null && (
-        <Lightbox urls={urls} startIndex={lightboxIndex} onClose={() => setLightboxIndex(null)} />
+      {lightboxIndex !== null && createPortal(
+        <Lightbox urls={urls} startIndex={lightboxIndex} onClose={() => setLightboxIndex(null)} />,
+        document.body
       )}
     </>
   );

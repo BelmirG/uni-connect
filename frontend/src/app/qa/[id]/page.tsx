@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import {
   ChevronUp,
@@ -14,7 +15,7 @@ import {
   CornerDownRight,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
-import { ImageUploader } from "@/components/ImageUploader";
+import { AttachBar } from "@/components/AttachBar";
 import { ImageGrid } from "@/components/ImageGrid";
 import { FileAttachmentList } from "@/components/FileAttachmentList";
 import type { FileAttachment } from "@/components/FileUploader";
@@ -56,15 +57,15 @@ interface ThreadCtx {
   replyingToId: string | null;
   inlineContent: string;
   inlineImageUrls: string[];
-  inlineImagesUploading: boolean;
-  inlineUploaderKey: number;
+  inlineFileAttachments: FileAttachment[];
+  inlineUploading: boolean;
   inlineSubmitting: boolean;
   inlineError: string | null;
   onVote: (id: string, type: "up" | "down") => void;
   onDelete: (id: string) => void;
   onStartReply: (id: string) => void;
   onSetContent: (v: string) => void;
-  onSetUrls: (urls: string[], uploading: boolean) => void;
+  onSetAttachments: (imageUrls: string[], fileAttachments: FileAttachment[], uploading: boolean) => void;
   onSubmitInline: (parentId: string) => void;
   onCancelInline: () => void;
 }
@@ -250,15 +251,15 @@ function AnswerNode({ node, depth }: { node: TreeNode; depth: number }) {
               autoFocus
               className="w-full resize-none text-sm px-3 py-2 border border-input rounded-xl bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
-            <ImageUploader key={ctx.inlineUploaderKey} onUrlsChange={ctx.onSetUrls} />
+            <AttachBar onChange={ctx.onSetAttachments} />
             {ctx.inlineError && <p className="text-xs text-destructive">{ctx.inlineError}</p>}
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
                 onClick={() => ctx.onSubmitInline(p.id)}
-                disabled={ctx.inlineSubmitting || ctx.inlineImagesUploading || (!ctx.inlineContent.trim() && !ctx.inlineImageUrls.length)}
+                disabled={ctx.inlineSubmitting || ctx.inlineUploading || (!ctx.inlineContent.trim() && !ctx.inlineImageUrls.length && !ctx.inlineFileAttachments.length)}
               >
-                {ctx.inlineImagesUploading ? "Uploading…" : ctx.inlineSubmitting ? "Posting…" : "Reply"}
+                {ctx.inlineUploading ? "Uploading…" : ctx.inlineSubmitting ? "Posting…" : "Reply"}
               </Button>
               <Button size="sm" variant="outline" onClick={ctx.onCancelInline}>Cancel</Button>
               <span className="flex items-center gap-1 text-xs text-muted-foreground ml-1">
@@ -305,17 +306,17 @@ export default function QADetailPage() {
 
   const [topContent, setTopContent] = useState("");
   const [topImageUrls, setTopImageUrls] = useState<string[]>([]);
-  const [topImagesUploading, setTopImagesUploading] = useState(false);
+  const [topFileAttachments, setTopFileAttachments] = useState<FileAttachment[]>([]);
+  const [topUploading, setTopUploading] = useState(false);
   const [topUploaderKey, setTopUploaderKey] = useState(0);
   const [topSubmitting, setTopSubmitting] = useState(false);
   const [topError, setTopError] = useState<string | null>(null);
-  const [composerOpen, setComposerOpen] = useState(false);
 
   const [replyingToId, setReplyingToId] = useState<string | null>(null);
   const [inlineContent, setInlineContent] = useState("");
   const [inlineImageUrls, setInlineImageUrls] = useState<string[]>([]);
-  const [inlineImagesUploading, setInlineImagesUploading] = useState(false);
-  const [inlineUploaderKey, setInlineUploaderKey] = useState(0);
+  const [inlineFileAttachments, setInlineFileAttachments] = useState<FileAttachment[]>([]);
+  const [inlineUploading, setInlineUploading] = useState(false);
   const [inlineSubmitting, setInlineSubmitting] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
 
@@ -351,21 +352,21 @@ export default function QADetailPage() {
 
   async function handleTopAnswer(e: React.FormEvent) {
     e.preventDefault();
-    if (!topContent.trim() && !topImageUrls.length) return;
-    if (topImagesUploading) return;
+    if (!topContent.trim() && !topImageUrls.length && !topFileAttachments.length) return;
+    if (topUploading) return;
     setTopSubmitting(true);
     setTopError(null);
     try {
       const newAnswer = await apiFetch<QAPost>(`/api/qa/${id}/answers`, {
         method: "POST",
-        body: JSON.stringify({ content: topContent.trim(), image_urls: topImageUrls }),
+        body: JSON.stringify({ content: topContent.trim(), image_urls: topImageUrls, file_attachments: topFileAttachments }),
       });
       setAllAnswers((prev) => [...prev, newAnswer]);
       setQuestion((prev) => (prev ? { ...prev, reply_count: prev.reply_count + 1 } : prev));
       setTopContent("");
       setTopImageUrls([]);
+      setTopFileAttachments([]);
       setTopUploaderKey((k) => k + 1);
-      setComposerOpen(false);
     } catch (err: unknown) {
       setTopError(err instanceof Error ? err.message : "Failed to post answer.");
     } finally {
@@ -378,25 +379,26 @@ export default function QADetailPage() {
     setReplyingToId(commentId);
     setInlineContent("");
     setInlineImageUrls([]);
+    setInlineFileAttachments([]);
     setInlineError(null);
-    setInlineUploaderKey((k) => k + 1);
   }
 
   async function handleInlineReply(parentId: string) {
-    if (!inlineContent.trim() && !inlineImageUrls.length) return;
-    if (inlineImagesUploading) return;
+    if (!inlineContent.trim() && !inlineImageUrls.length && !inlineFileAttachments.length) return;
+    if (inlineUploading) return;
     setInlineSubmitting(true);
     setInlineError(null);
     try {
       const newReply = await apiFetch<QAPost>(`/api/qa/${parentId}/answers`, {
         method: "POST",
-        body: JSON.stringify({ content: inlineContent.trim(), image_urls: inlineImageUrls }),
+        body: JSON.stringify({ content: inlineContent.trim(), image_urls: inlineImageUrls, file_attachments: inlineFileAttachments }),
       });
       setAllAnswers((prev) => [...prev, newReply]);
       setQuestion((prev) => (prev ? { ...prev, reply_count: prev.reply_count + 1 } : prev));
       setReplyingToId(null);
       setInlineContent("");
       setInlineImageUrls([]);
+      setInlineFileAttachments([]);
     } catch (err: unknown) {
       setInlineError(err instanceof Error ? err.message : "Failed to reply.");
     } finally {
@@ -414,30 +416,36 @@ export default function QADetailPage() {
     replyingToId,
     inlineContent,
     inlineImageUrls,
-    inlineImagesUploading,
-    inlineUploaderKey,
+    inlineFileAttachments,
+    inlineUploading,
     inlineSubmitting,
     inlineError,
     onVote: handleVote,
     onDelete: handleDelete,
     onStartReply: startInlineReply,
     onSetContent: setInlineContent,
-    onSetUrls: (urls, uploading) => { setInlineImageUrls(urls); setInlineImagesUploading(uploading); },
+    onSetAttachments: (imageUrls, fileAttachments, uploading) => {
+      setInlineImageUrls(imageUrls);
+      setInlineFileAttachments(fileAttachments);
+      setInlineUploading(uploading);
+    },
     onSubmitInline: handleInlineReply,
     onCancelInline: () => setReplyingToId(null),
   };
 
   return (
     <Ctx.Provider value={ctxValue}>
-      <main className="max-w-xl mx-auto px-4 pt-4 pb-36">
+      <main className="max-w-xl mx-auto px-4 pt-4 pb-8">
         {/* Back link */}
-        <button
-          onClick={() => router.back()}
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4"
+        {/* Always exits to the Q&A list — browser history may point at another
+            section when the nav bar restored us into this thread. */}
+        <Link
+          href="/qa"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4 no-underline"
         >
           <ArrowLeft className="w-4 h-4" />
           Back
-        </button>
+        </Link>
 
         {/* Question card */}
         <div className="bg-white border border-border rounded-xl shadow-sm overflow-hidden mb-4">
@@ -508,6 +516,43 @@ export default function QADetailPage() {
           </div>
         </div>
 
+        {/* Inline answer composer */}
+        <div className="bg-white border border-border rounded-xl shadow-sm overflow-hidden mb-4">
+          <form onSubmit={handleTopAnswer} className="px-4 py-3 space-y-3">
+            <textarea
+              value={topContent}
+              onChange={(e) => setTopContent(e.target.value)}
+              placeholder="Write an anonymous answer…"
+              rows={3}
+              className="w-full resize-none text-sm placeholder:text-muted-foreground border border-input rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+            <div className="flex items-center gap-2 flex-wrap">
+              <AttachBar
+                key={topUploaderKey}
+                onChange={(imageUrls, fileAttachments, uploading) => {
+                  setTopImageUrls(imageUrls);
+                  setTopFileAttachments(fileAttachments);
+                  setTopUploading(uploading);
+                }}
+              />
+              {topError && <p className="text-xs text-destructive">{topError}</p>}
+              <div className="ml-auto flex items-center gap-2">
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Lock className="w-3 h-3" />
+                  anonymous
+                </span>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={topSubmitting || topUploading || (!topContent.trim() && !topImageUrls.length && !topFileAttachments.length)}
+                >
+                  {topUploading ? "Uploading…" : topSubmitting ? "Posting…" : "Answer"}
+                </Button>
+              </div>
+            </div>
+          </form>
+        </div>
+
         {/* Answers */}
         <div>
           <h3 className="text-sm font-semibold text-muted-foreground mb-3">
@@ -523,71 +568,6 @@ export default function QADetailPage() {
           )}
         </div>
       </main>
-
-      {/* Fixed compose bar */}
-      <div className="fixed bottom-16 left-0 right-0 px-4 py-2 bg-white/95 backdrop-blur-sm border-t border-border z-40">
-        <div className="max-w-xl mx-auto">
-          <button
-            onClick={() => setComposerOpen(true)}
-            className="w-full flex items-center gap-3 px-4 py-2.5 rounded-full bg-muted hover:bg-muted/80 transition-colors text-sm text-muted-foreground"
-          >
-            <Lock className="w-4 h-4 flex-shrink-0" />
-            Write an anonymous answer…
-          </button>
-        </div>
-      </div>
-
-      {/* Compose sheet */}
-      {composerOpen && (
-        <>
-          <div onClick={() => setComposerOpen(false)} className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100]" />
-          <div className="fixed bottom-[4.5rem] left-1/2 -translate-x-1/2 w-[min(600px,94vw)] bg-white rounded-2xl z-[101] shadow-2xl max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-sm">Answer anonymously</span>
-                <span className="flex items-center gap-1 text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-full">
-                  <Lock className="w-2.5 h-2.5" />
-                  anonymous
-                </span>
-              </div>
-              <button
-                onClick={() => setComposerOpen(false)}
-                className="rounded-full p-1 hover:bg-muted text-muted-foreground transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="overflow-y-auto flex-1">
-              <form onSubmit={handleTopAnswer} className="px-4 py-3 space-y-3">
-                <textarea
-                  autoFocus
-                  value={topContent}
-                  onChange={(e) => setTopContent(e.target.value)}
-                  placeholder="Write an anonymous answer…"
-                  rows={4}
-                  className="w-full resize-none text-sm placeholder:text-muted-foreground border-0 outline-none focus:ring-0 bg-transparent min-h-[90px]"
-                />
-                <div className="border-t border-border pt-3 space-y-3">
-                  <ImageUploader
-                    key={topUploaderKey}
-                    onUrlsChange={(urls, uploading) => { setTopImageUrls(urls); setTopImagesUploading(uploading); }}
-                  />
-                  {topError && <p className="text-xs text-destructive">{topError}</p>}
-                  <div className="flex justify-end">
-                    <Button
-                      type="submit"
-                      size="sm"
-                      disabled={topSubmitting || topImagesUploading || (!topContent.trim() && !topImageUrls.length)}
-                    >
-                      {topImagesUploading ? "Uploading…" : topSubmitting ? "Posting…" : "Answer anonymously"}
-                    </Button>
-                  </div>
-                </div>
-              </form>
-            </div>
-          </div>
-        </>
-      )}
     </Ctx.Provider>
   );
 }

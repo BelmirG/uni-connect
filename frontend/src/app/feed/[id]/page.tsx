@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import UserSearchInput from "@/components/UserSearchInput";
-import { ImageUploader } from "@/components/ImageUploader";
+import { AttachBar } from "@/components/AttachBar";
 import { ImageGrid } from "@/components/ImageGrid";
 import { FileAttachmentList } from "@/components/FileAttachmentList";
 import type { FileAttachment } from "@/components/FileUploader";
@@ -65,15 +65,15 @@ interface ThreadCtx {
   replyingToId: string | null;
   inlineContent: string;
   inlineImageUrls: string[];
-  inlineImagesUploading: boolean;
-  inlineUploaderKey: number;
+  inlineFileAttachments: FileAttachment[];
+  inlineUploading: boolean;
   inlineSubmitting: boolean;
   inlineError: string | null;
   onVote: (id: string, type: "up" | "down") => void;
   onDelete: (id: string) => void;
   onStartReply: (id: string) => void;
   onSetContent: (v: string) => void;
-  onSetUrls: (urls: string[], uploading: boolean) => void;
+  onSetAttachments: (imageUrls: string[], fileAttachments: FileAttachment[], uploading: boolean) => void;
   onSubmitInline: (parentId: string) => void;
   onCancelInline: () => void;
 }
@@ -275,15 +275,15 @@ function CommentNode({ node, depth }: { node: TreeNode; depth: number }) {
               autoFocus
               className="w-full resize-none text-sm px-3 py-2 border border-input rounded-xl bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
-            <ImageUploader key={ctx.inlineUploaderKey} onUrlsChange={ctx.onSetUrls} />
+            <AttachBar onChange={ctx.onSetAttachments} />
             {ctx.inlineError && <p className="text-xs text-destructive">{ctx.inlineError}</p>}
             <div className="flex gap-2">
               <Button
                 size="sm"
                 onClick={() => ctx.onSubmitInline(p.id)}
-                disabled={ctx.inlineSubmitting || ctx.inlineImagesUploading || (!ctx.inlineContent.trim() && !ctx.inlineImageUrls.length)}
+                disabled={ctx.inlineSubmitting || ctx.inlineUploading || (!ctx.inlineContent.trim() && !ctx.inlineImageUrls.length && !ctx.inlineFileAttachments.length)}
               >
-                {ctx.inlineImagesUploading ? "Uploading…" : ctx.inlineSubmitting ? "Posting…" : "Reply"}
+                {ctx.inlineUploading ? "Uploading…" : ctx.inlineSubmitting ? "Posting…" : "Reply"}
               </Button>
               <Button size="sm" variant="outline" onClick={ctx.onCancelInline}>Cancel</Button>
             </div>
@@ -327,7 +327,8 @@ export default function PostDetailPage() {
 
   const [topContent, setTopContent] = useState("");
   const [topImageUrls, setTopImageUrls] = useState<string[]>([]);
-  const [topImagesUploading, setTopImagesUploading] = useState(false);
+  const [topFileAttachments, setTopFileAttachments] = useState<FileAttachment[]>([]);
+  const [topUploading, setTopUploading] = useState(false);
   const [topUploaderKey, setTopUploaderKey] = useState(0);
   const [topSubmitting, setTopSubmitting] = useState(false);
   const [topError, setTopError] = useState<string | null>(null);
@@ -335,8 +336,8 @@ export default function PostDetailPage() {
   const [replyingToId, setReplyingToId] = useState<string | null>(null);
   const [inlineContent, setInlineContent] = useState("");
   const [inlineImageUrls, setInlineImageUrls] = useState<string[]>([]);
-  const [inlineImagesUploading, setInlineImagesUploading] = useState(false);
-  const [inlineUploaderKey, setInlineUploaderKey] = useState(0);
+  const [inlineFileAttachments, setInlineFileAttachments] = useState<FileAttachment[]>([]);
+  const [inlineUploading, setInlineUploading] = useState(false);
   const [inlineSubmitting, setInlineSubmitting] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
 
@@ -380,19 +381,20 @@ export default function PostDetailPage() {
 
   async function handleTopReply(e: React.FormEvent) {
     e.preventDefault();
-    if (!topContent.trim() && !topImageUrls.length) return;
-    if (topImagesUploading) return;
+    if (!topContent.trim() && !topImageUrls.length && !topFileAttachments.length) return;
+    if (topUploading) return;
     setTopSubmitting(true);
     setTopError(null);
     try {
       const newReply = await apiFetch<Post>(`/api/posts/${id}/replies`, {
         method: "POST",
-        body: JSON.stringify({ content: topContent.trim(), image_urls: topImageUrls }),
+        body: JSON.stringify({ content: topContent.trim(), image_urls: topImageUrls, file_attachments: topFileAttachments }),
       });
       setAllReplies((prev) => [...prev, newReply]);
       setPost((prev) => (prev ? { ...prev, reply_count: prev.reply_count + 1 } : prev));
       setTopContent("");
       setTopImageUrls([]);
+      setTopFileAttachments([]);
       setTopUploaderKey((k) => k + 1);
     } catch (err: unknown) {
       setTopError(err instanceof Error ? err.message : "Failed to post comment.");
@@ -406,25 +408,26 @@ export default function PostDetailPage() {
     setReplyingToId(commentId);
     setInlineContent("");
     setInlineImageUrls([]);
+    setInlineFileAttachments([]);
     setInlineError(null);
-    setInlineUploaderKey((k) => k + 1);
   }
 
   async function handleInlineReply(parentId: string) {
-    if (!inlineContent.trim() && !inlineImageUrls.length) return;
-    if (inlineImagesUploading) return;
+    if (!inlineContent.trim() && !inlineImageUrls.length && !inlineFileAttachments.length) return;
+    if (inlineUploading) return;
     setInlineSubmitting(true);
     setInlineError(null);
     try {
       const newReply = await apiFetch<Post>(`/api/posts/${parentId}/replies`, {
         method: "POST",
-        body: JSON.stringify({ content: inlineContent.trim(), image_urls: inlineImageUrls }),
+        body: JSON.stringify({ content: inlineContent.trim(), image_urls: inlineImageUrls, file_attachments: inlineFileAttachments }),
       });
       setAllReplies((prev) => [...prev, newReply]);
       setPost((prev) => (prev ? { ...prev, reply_count: prev.reply_count + 1 } : prev));
       setReplyingToId(null);
       setInlineContent("");
       setInlineImageUrls([]);
+      setInlineFileAttachments([]);
     } catch (err: unknown) {
       setInlineError(err instanceof Error ? err.message : "Failed to reply.");
     } finally {
@@ -444,15 +447,19 @@ export default function PostDetailPage() {
     replyingToId,
     inlineContent,
     inlineImageUrls,
-    inlineImagesUploading,
-    inlineUploaderKey,
+    inlineFileAttachments,
+    inlineUploading,
     inlineSubmitting,
     inlineError,
     onVote: handleVote,
     onDelete: handleDelete,
     onStartReply: startInlineReply,
     onSetContent: setInlineContent,
-    onSetUrls: (urls, uploading) => { setInlineImageUrls(urls); setInlineImagesUploading(uploading); },
+    onSetAttachments: (imageUrls, fileAttachments, uploading) => {
+      setInlineImageUrls(imageUrls);
+      setInlineFileAttachments(fileAttachments);
+      setInlineUploading(uploading);
+    },
     onSubmitInline: handleInlineReply,
     onCancelInline: () => setReplyingToId(null),
   };
@@ -461,13 +468,15 @@ export default function PostDetailPage() {
     <Ctx.Provider value={ctxValue}>
       <main className="max-w-xl mx-auto px-4 pt-4 pb-24">
         {/* Back link */}
-        <button
-          onClick={() => router.back()}
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4"
+        {/* Always exits to the feed list — browser history may point at another
+            section when the nav bar restored us into this thread. */}
+        <Link
+          href="/feed"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4 no-underline"
         >
           <ArrowLeft className="w-4 h-4" />
           Back
-        </button>
+        </Link>
 
         {/* Original post */}
         <div className="bg-white border border-border rounded-xl shadow-sm overflow-hidden mb-4">
@@ -570,11 +579,12 @@ export default function PostDetailPage() {
               className="w-full resize-none text-sm placeholder:text-muted-foreground border border-input rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <div className="flex items-center gap-2 flex-wrap">
-              <ImageUploader
+              <AttachBar
                 key={topUploaderKey}
-                onUrlsChange={(urls, uploading) => {
-                  setTopImageUrls(urls);
-                  setTopImagesUploading(uploading);
+                onChange={(imageUrls, fileAttachments, uploading) => {
+                  setTopImageUrls(imageUrls);
+                  setTopFileAttachments(fileAttachments);
+                  setTopUploading(uploading);
                 }}
               />
               {topError && <p className="text-xs text-destructive">{topError}</p>}
@@ -582,9 +592,9 @@ export default function PostDetailPage() {
                 type="submit"
                 size="sm"
                 className="ml-auto"
-                disabled={topSubmitting || topImagesUploading || (!topContent.trim() && !topImageUrls.length)}
+                disabled={topSubmitting || topUploading || (!topContent.trim() && !topImageUrls.length && !topFileAttachments.length)}
               >
-                {topImagesUploading ? "Uploading…" : topSubmitting ? "Posting…" : "Comment"}
+                {topUploading ? "Uploading…" : topSubmitting ? "Posting…" : "Comment"}
               </Button>
             </div>
           </form>

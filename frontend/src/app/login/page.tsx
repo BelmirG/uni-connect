@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, GraduationCap } from "lucide-react";
@@ -16,6 +16,13 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Already signed in? Skip the form and go straight to the feed.
+  useEffect(() => {
+    apiFetch("/api/auth/me")
+      .then(() => router.replace("/feed"))
+      .catch(() => {});
+  }, [router]);
 
   function update(field: "email" | "password") {
     return (e: React.ChangeEvent<HTMLInputElement>) =>
