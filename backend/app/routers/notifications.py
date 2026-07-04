@@ -12,7 +12,9 @@ from app.core.redis import redis
 from app.core.security import decode_access_token
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.models.club import Club
 from app.models.notification import Notification
+from app.models.post import Post
 from app.models.user import User
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
@@ -27,9 +29,15 @@ async def get_notifications(
 ):
     from sqlalchemy import func
     Actor = aliased(User)
+    # reference_id can point at a post ("mention", "reply", …) or a club
+    # ("chat_mention", "club_*"); resolve both so the UI can deep-link without
+    # extra requests. The actor join is OUTER because system notifications
+    # (milestones, anonymous Q&A answers) deliberately have no actor.
     base = (
-        select(Notification, Actor)
-        .join(Actor, Actor.id == Notification.actor_id)
+        select(Notification, Actor, Post.post_type, Club.slug, Club.name)
+        .outerjoin(Actor, Actor.id == Notification.actor_id)
+        .outerjoin(Post, Post.id == Notification.reference_id)
+        .outerjoin(Club, Club.id == Notification.reference_id)
         .where(Notification.user_id == current_user.id)
     )
     total = (await db.execute(
@@ -44,13 +52,17 @@ async def get_notifications(
             {
                 "id": str(n.id),
                 "type": n.type,
+                "reference_id": str(n.reference_id) if n.reference_id else None,
+                "reference_post_type": post_type,
+                "reference_club_slug": club_slug,
+                "reference_club_name": club_name,
                 "is_read": n.is_read,
                 "created_at": n.created_at.isoformat(),
-                "actor_username": actor.username,
-                "actor_display_name": actor.display_name,
-                "actor_avatar_url": actor.avatar_url,
+                "actor_username": actor.username if actor else None,
+                "actor_display_name": actor.display_name if actor else None,
+                "actor_avatar_url": actor.avatar_url if actor else None,
             }
-            for n, actor in rows
+            for n, actor, post_type, club_slug, club_name in rows
         ],
     }
 

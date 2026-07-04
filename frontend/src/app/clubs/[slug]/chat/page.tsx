@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import MiniAvatar from "@/components/MiniAvatar";
+import MentionSuggestions from "@/components/MentionSuggestions";
 import { Linkify } from "@/lib/linkify";
 
 const IUS_BLUE = "#3865a6";
@@ -372,6 +373,11 @@ export default function ClubChatPage() {
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const [mediaOpen, setMediaOpen] = useState(false);
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
+  const [caret, setCaret] = useState<number | null>(null);
+  // Who's typing right now: username → display_name. Entries expire after 3s.
+  const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
+  const typingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const lastTypingSentRef = useRef(0);
 
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -387,6 +393,7 @@ export default function ClubChatPage() {
   useEffect(() => {
     let cancelled = false;
     async function init() {
+      let myUsername: string | null = null;
       try {
         const [history, me, club] = await Promise.all([
           apiFetch<ChatMessage[]>(`/api/clubs/${slug}/chat`),
@@ -397,6 +404,7 @@ export default function ClubChatPage() {
         setMessages(history);
         setCurrentUsername(me.username);
         setClubName(club.name);
+        myUsername = me.username;
       } catch (err: unknown) {
         if (err instanceof ApiError && err.status === 401) router.replace("/login");
         else if (err instanceof ApiError && err.status === 403) router.replace(`/clubs/${slug}`);
@@ -406,7 +414,31 @@ export default function ClubChatPage() {
       wsRef.current = ws;
       ws.onopen = () => setStatus("connected");
       ws.onmessage = (event) => {
-        const msg: ChatMessage = JSON.parse(event.data);
+        const data = JSON.parse(event.data);
+        // Ephemeral typing signal — light up that member's name for 3s.
+        if (data.event === "typing") {
+          if (data.username !== myUsername) {
+            setTypingUsers((prev) => ({ ...prev, [data.username]: data.display_name }));
+            const timers = typingTimersRef.current;
+            const existing = timers.get(data.username);
+            if (existing) clearTimeout(existing);
+            timers.set(data.username, setTimeout(() => {
+              setTypingUsers((prev) => {
+                const { [data.username]: _, ...rest } = prev;
+                return rest;
+              });
+              timers.delete(data.username);
+            }, 3000));
+          }
+          return;
+        }
+        const msg = data as ChatMessage;
+        // Their message replaces the "typing…" hint immediately.
+        setTypingUsers((prev) => {
+          if (!(msg.author.username in prev)) return prev;
+          const { [msg.author.username]: _, ...rest } = prev;
+          return rest;
+        });
         setMessages((prev) => [...prev, msg]);
       };
       ws.onclose = () => setStatus("disconnected");
@@ -469,6 +501,15 @@ export default function ClubChatPage() {
 
   function handleSubmit(e: React.FormEvent) { e.preventDefault(); send(); }
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }
+
+  // Tell the room we're typing — throttled to one signal every 2s.
+  function signalTyping() {
+    const now = Date.now();
+    if (now - lastTypingSentRef.current < 2000) return;
+    if (status !== "connected" || !wsRef.current) return;
+    lastTypingSentRef.current = now;
+    wsRef.current.send(JSON.stringify({ event: "typing" }));
+  }
 
   function scrollToQuote(quote: string) {
     const target = messagesRef.current.find((m) => m.content === quote || (m.content ?? "").startsWith(quote));
@@ -577,6 +618,23 @@ export default function ClubChatPage() {
         <div ref={bottomRef} />
       </div>
 
+      {/* Typing strip — who's typing right now */}
+      {Object.keys(typingUsers).length > 0 && (
+        <div className="flex items-center gap-1.5 px-4 py-1.5 flex-shrink-0">
+          <span className="typing-dot" style={{ width: 4, height: 4 }} />
+          <span className="typing-dot" style={{ width: 4, height: 4, animationDelay: "0.15s" }} />
+          <span className="typing-dot" style={{ width: 4, height: 4, animationDelay: "0.3s" }} />
+          <span className="text-[11px] text-on-surface-variant italic ml-1">
+            {(() => {
+              const names = Object.values(typingUsers);
+              if (names.length === 1) return `${names[0]} is typing…`;
+              if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
+              return "Several people are typing…";
+            })()}
+          </span>
+        </div>
+      )}
+
       {/* Reply strip */}
       {replyTo && (
         <div className="flex items-center gap-2 px-4 py-2.5 bg-surface-container-low border-t border-outline-variant/60 flex-shrink-0">
@@ -641,18 +699,35 @@ export default function ClubChatPage() {
           )}
         </div>
 
-        <textarea
-          ref={inputRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={status === "connected" ? "Type a message…" : "Disconnected"}
-          disabled={status !== "connected"}
-          maxLength={2000}
-          rows={1}
-          className="flex-1 px-4 py-2.5 text-sm rounded-full border border-outline-variant bg-surface-container-low placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 resize-none max-h-32 overflow-y-auto text-on-surface"
-          style={{ lineHeight: "1.4" }}
-        />
+        <div className="relative flex-1">
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={(e) => { setInput(e.target.value); setCaret(e.target.selectionStart); signalTyping(); }}
+            onKeyUp={(e) => setCaret(e.currentTarget.selectionStart)}
+            onClick={(e) => setCaret(e.currentTarget.selectionStart)}
+            onKeyDown={handleKeyDown}
+            placeholder={status === "connected" ? "Type a message…" : "Disconnected"}
+            disabled={status !== "connected"}
+            maxLength={2000}
+            rows={1}
+            className="w-full px-4 py-2.5 text-sm rounded-full border border-outline-variant bg-surface-container-low placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 resize-none max-h-32 overflow-y-auto text-on-surface"
+            style={{ lineHeight: "1.4" }}
+          />
+          <MentionSuggestions
+            value={input}
+            caret={caret}
+            dropUp
+            onPick={(v, c) => {
+              setInput(v);
+              setCaret(c);
+              requestAnimationFrame(() => {
+                inputRef.current?.focus();
+                inputRef.current?.setSelectionRange(c, c);
+              });
+            }}
+          />
+        </div>
         <button
           type="submit"
           disabled={!canSend}

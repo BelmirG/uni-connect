@@ -4,14 +4,18 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { useRouter, usePathname } from "next/navigation";
 import MiniAvatar from "@/components/MiniAvatar";
 import { wsUrl } from "@/lib/ws";
-import { X, ImageIcon, FileText } from "lucide-react";
+import { X, ImageIcon, FileText, TrendingUp, MessageCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface NotifPayload {
-  type: "follow" | "club_invite" | "dm";
-  actor_username: string;
-  actor_display_name: string;
-  actor_avatar_url: string | null;
+  type:
+    | "follow" | "club_invite" | "dm" | "mention" | "chat_mention"
+    | "reply" | "milestone" | "qa_answer"
+    | "club_join_request" | "club_approved" | "club_role";
+  // Absent on system notifications (milestone, qa_answer) — nobody's identity rides along.
+  actor_username?: string;
+  actor_display_name?: string;
+  actor_avatar_url?: string | null;
   // dm
   conversation_id?: string;
   preview?: string;
@@ -19,9 +23,13 @@ interface NotifPayload {
   has_file?: boolean;
   is_post_share?: boolean;
   silent?: boolean;
-  // club_invite
+  // club_invite / chat_mention / club_*
   club_name?: string;
   club_slug?: string;
+  role?: string;
+  // mention / reply / milestone / qa_answer
+  post_id?: string;
+  count?: number;
 }
 
 interface Toast {
@@ -42,6 +50,10 @@ export const useToast = () => useContext(Ctx);
 function toastHref(p: NotifPayload): string {
   if (p.type === "dm" && p.conversation_id) return `/messages/${p.conversation_id}`;
   if (p.type === "club_invite") return `/profile`;
+  if ((p.type === "mention" || p.type === "reply" || p.type === "milestone") && p.post_id) return `/feed/${p.post_id}`;
+  if (p.type === "qa_answer" && p.post_id) return `/qa/${p.post_id}`;
+  if (p.type === "chat_mention" && p.club_slug) return `/clubs/${p.club_slug}/chat`;
+  if ((p.type === "club_join_request" || p.type === "club_approved" || p.type === "club_role") && p.club_slug) return `/clubs/${p.club_slug}`;
   return `/profile/${p.actor_username}`;
 }
 
@@ -93,6 +105,70 @@ function ToastContent({ p }: { p: NotifPayload }) {
       </div>
     );
   }
+  if (p.type === "mention" || p.type === "reply") {
+    return (
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-foreground truncate leading-tight">
+          {p.actor_display_name}
+        </p>
+        <p className="text-xs text-muted-foreground leading-snug mt-0.5">
+          {p.type === "reply" ? "Replied to your post" : "Mentioned you in a post"}
+        </p>
+      </div>
+    );
+  }
+  if (p.type === "milestone") {
+    return (
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-foreground truncate leading-tight">
+          Your post is taking off
+        </p>
+        <p className="text-xs text-muted-foreground leading-snug mt-0.5">
+          It just reached {p.count} upvotes
+        </p>
+      </div>
+    );
+  }
+  if (p.type === "qa_answer") {
+    return (
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-foreground truncate leading-tight">
+          New answer
+        </p>
+        <p className="text-xs text-muted-foreground leading-snug mt-0.5">
+          Your anonymous question got a new answer
+        </p>
+      </div>
+    );
+  }
+  if (p.type === "club_join_request" || p.type === "club_approved" || p.type === "club_role") {
+    const line =
+      p.type === "club_join_request" ? `Requested to join ${p.club_name}` :
+      p.type === "club_approved" ? `Accepted you into ${p.club_name}` :
+      `Made you a ${p.role ?? "moderator"} of ${p.club_name}`;
+    return (
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-foreground truncate leading-tight">
+          {p.actor_display_name}
+        </p>
+        <p className="text-xs text-muted-foreground truncate leading-snug mt-0.5">
+          {line}
+        </p>
+      </div>
+    );
+  }
+  if (p.type === "chat_mention") {
+    return (
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-foreground truncate leading-tight">
+          {p.actor_display_name}
+        </p>
+        <p className="text-xs text-muted-foreground truncate leading-snug mt-0.5">
+          Mentioned you in {p.club_name ?? "a club"} chat
+        </p>
+      </div>
+    );
+  }
   // follow
   return (
     <div className="flex-1 min-w-0">
@@ -134,11 +210,20 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
       )}
       onClick={handleClick}
     >
-      <MiniAvatar
-        name={toast.payload.actor_display_name}
-        url={toast.payload.actor_avatar_url}
-        size={38}
-      />
+      {toast.payload.actor_display_name ? (
+        <MiniAvatar
+          name={toast.payload.actor_display_name}
+          url={toast.payload.actor_avatar_url ?? null}
+          size={38}
+        />
+      ) : (
+        // System notification — no actor to show, use an icon instead.
+        <span className="w-[38px] h-[38px] rounded-full bg-surface-container flex items-center justify-center flex-shrink-0 text-secondary">
+          {toast.payload.type === "milestone"
+            ? <TrendingUp className="w-5 h-5" />
+            : <MessageCircle className="w-5 h-5" />}
+        </span>
+      )}
       <ToastContent p={toast.payload} />
       <button
         onClick={(e) => { e.stopPropagation(); setVisible(false); setTimeout(onDismiss, 300); }}

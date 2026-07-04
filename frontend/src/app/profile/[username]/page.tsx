@@ -15,8 +15,18 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   Bell, ChevronUp, ChevronDown, MessageCircle, Pencil,
-  LogOut, X, Check, Camera, Lock,
+  LogOut, X, Check, Camera, Lock, Bookmark, Trash2, Settings2,
 } from "lucide-react";
+
+// Pop-up preference categories — keys match the backend's NOTIFICATION_CATEGORIES.
+const NOTIF_CATEGORIES: [string, string][] = [
+  ["mentions", "Mentions"],
+  ["replies", "Replies"],
+  ["follows", "New followers"],
+  ["milestones", "Upvote milestones"],
+  ["clubs", "Club activity"],
+  ["qa_answers", "Q&A answers"],
+];
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -80,12 +90,42 @@ interface Invitation {
 
 type FollowNotif = {
   id: string;
-  actor_username: string;
-  actor_display_name: string;
+  type: string;
+  reference_id: string | null;
+  reference_post_type: string | null;
+  reference_club_slug: string | null;
+  reference_club_name: string | null;
+  actor_username: string | null;
+  actor_display_name: string | null;
   actor_avatar_url: string | null;
   is_read: boolean;
   created_at: string;
 };
+
+// Where clicking a notification should land, per type.
+function notifHref(n: FollowNotif): string | null {
+  if ((n.type === "mention" || n.type === "reply" || n.type.startsWith("milestone_") || n.type === "qa_answer") && n.reference_id) {
+    return n.reference_post_type === "anonymous_qa" ? `/qa/${n.reference_id}` : `/feed/${n.reference_id}`;
+  }
+  if (n.type === "chat_mention" && n.reference_club_slug) return `/clubs/${n.reference_club_slug}/chat`;
+  if (n.type.startsWith("club_") && n.reference_club_slug) return `/clubs/${n.reference_club_slug}`;
+  return null;
+}
+
+// The sentence after the actor's name (or the whole sentence for system notifications).
+function notifText(n: FollowNotif): string {
+  const club = n.reference_club_name ?? "your club";
+  if (n.type === "mention") return " mentioned you in a post";
+  if (n.type === "chat_mention") return " mentioned you in a club chat";
+  if (n.type === "reply") return " replied to your post";
+  if (n.type.startsWith("milestone_")) return `Your post reached ${n.type.slice("milestone_".length)} upvotes`;
+  if (n.type === "qa_answer") return "Your anonymous question got a new answer";
+  if (n.type === "club_join_request") return ` requested to join ${club}`;
+  if (n.type === "club_approved") return ` accepted you into ${club}`;
+  if (n.type === "club_role_moderator") return ` made you a moderator of ${club}`;
+  if (n.type === "club_role_owner") return ` made you the owner of ${club}`;
+  return " started following you";
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -134,6 +174,10 @@ export default function ProfilePage() {
   const [editFaculty, setEditFaculty] = useState<Faculty | "">("");
   const [editProgram, setEditProgram] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const [followsModal, setFollowsModal] = useState<"followers" | "following" | null>(null);
@@ -154,6 +198,31 @@ export default function ProfilePage() {
   const [reportDone, setReportDone] = useState(false);
 
   const [notifOpen, setNotifOpen] = useState(false);
+  const [prefsOpen, setPrefsOpen] = useState(false);
+  const [notifPrefs, setNotifPrefs] = useState<Record<string, boolean> | null>(null);
+
+  function loadNotifPrefs() {
+    apiFetch<Record<string, boolean>>("/api/users/me/notification-prefs")
+      .then(setNotifPrefs)
+      .catch(() => {});
+  }
+
+  function toggleNotifPref(key: string) {
+    const next = !(notifPrefs?.[key] ?? true);
+    // Optimistic flip; server response is authoritative, errors roll back.
+    setNotifPrefs((prev) => ({ ...(prev ?? {}), [key]: next }));
+    apiFetch<Record<string, boolean>>("/api/users/me/notification-prefs", {
+      method: "PUT",
+      body: JSON.stringify({ prefs: { [key]: next } }),
+    })
+      .then(setNotifPrefs)
+      .catch(() => setNotifPrefs((prev) => ({ ...(prev ?? {}), [key]: !next })));
+  }
+
+  // Reopening the bell should always start on the notification list, not settings.
+  useEffect(() => {
+    if (!notifOpen) setPrefsOpen(false);
+  }, [notifOpen]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [followNotifs, setFollowNotifs] = useState<FollowNotif[]>([]);
 
@@ -329,6 +398,22 @@ export default function ProfilePage() {
     router.replace("/login");
   }
 
+  async function handleDeleteAccount() {
+    if (!window.confirm("Really delete your account forever? There is no way back.")) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await apiFetch("/api/users/me", {
+        method: "DELETE",
+        body: JSON.stringify({ password: deletePassword }),
+      });
+      router.replace("/");
+    } catch (err: unknown) {
+      setDeleteError(err instanceof Error ? err.message : "Could not delete account.");
+      setDeleting(false);
+    }
+  }
+
   async function handleMessage() {
     if (!profile) return;
     try {
@@ -392,11 +477,20 @@ export default function ProfilePage() {
 
   function openBell() {
     setNotifOpen(true);
-    if (unreadFollows > 0) {
-      apiFetch("/api/notifications/mark-read", { method: "POST" })
-        .then(() => setFollowNotifs((prev) => prev.map((n) => ({ ...n, is_read: true }))))
-        .catch(() => {});
-    }
+    // Refetch on open — notifications that arrived after page load (especially
+    // muted ones, which have no toast to announce them) must still show up.
+    Promise.all([
+      apiFetch<Invitation[]>("/api/clubs/invitations/me"),
+      apiFetch<{ total: number; notifications: FollowNotif[] }>("/api/notifications"),
+    ]).then(([invs, notifData]) => {
+      setInvitations(invs);
+      setFollowNotifs(notifData.notifications);
+      if (notifData.notifications.some((n) => !n.is_read)) {
+        apiFetch("/api/notifications/mark-read", { method: "POST" })
+          .then(() => setFollowNotifs((prev) => prev.map((n) => ({ ...n, is_read: true }))))
+          .catch(() => {});
+      }
+    }).catch(() => {});
   }
 
   return (
@@ -463,9 +557,44 @@ export default function ProfilePage() {
                   <>
                     <div onClick={() => setNotifOpen(false)} className="fixed inset-0 z-[199]" />
                     <div className="absolute right-0 top-[calc(100%+6px)] w-[min(340px,90vw)] bg-white border border-border rounded-xl shadow-xl z-[200] overflow-hidden max-h-[70vh] flex flex-col">
-                      <div className="px-4 py-2.5 font-semibold text-sm border-b border-border sticky top-0 bg-white flex-shrink-0">
-                        Notifications
+                      <div className="px-4 py-2.5 font-semibold text-sm border-b border-border sticky top-0 bg-white flex-shrink-0 flex items-center justify-between">
+                        {prefsOpen ? "Pop-up settings" : "Notifications"}
+                        <button
+                          onClick={() => { setPrefsOpen((v) => !v); if (!notifPrefs) loadNotifPrefs(); }}
+                          aria-label="Notification settings"
+                          className={cn(
+                            "p-1 rounded-md transition-colors",
+                            prefsOpen ? "text-foreground bg-muted" : "text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          <Settings2 className="w-4 h-4" />
+                        </button>
                       </div>
+                      {prefsOpen ? (
+                        <div className="overflow-y-auto flex-1 py-1">
+                          {NOTIF_CATEGORIES.map(([key, label]) => (
+                            <label key={key} className="flex items-center justify-between px-4 py-2.5 text-sm cursor-pointer hover:bg-muted/50 transition-colors">
+                              <span className="text-foreground">{label}</span>
+                              <button
+                                role="switch"
+                                aria-checked={notifPrefs?.[key] ?? true}
+                                onClick={() => toggleNotifPref(key)}
+                                className={cn(
+                                  "w-9 h-5 rounded-full transition-colors relative flex-shrink-0",
+                                  (notifPrefs?.[key] ?? true) ? "bg-secondary" : "bg-muted-foreground/30"
+                                )}
+                              >
+                                <span
+                                  className={cn(
+                                    "absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform",
+                                    (notifPrefs?.[key] ?? true) ? "translate-x-4" : "translate-x-0"
+                                  )}
+                                />
+                              </button>
+                            </label>
+                          ))}
+                        </div>
+                      ) : (
                       <div className="overflow-y-auto flex-1">
                         {invitations.length === 0 && followNotifs.length === 0 ? (
                           <p className="text-muted-foreground text-sm text-center py-6">No notifications</p>
@@ -479,13 +608,30 @@ export default function ProfilePage() {
                                   !n.is_read && "bg-primary/5"
                                 )}
                               >
-                                <MiniAvatar name={n.actor_display_name} url={n.actor_avatar_url} size={34} />
+                                {n.actor_display_name ? (
+                                  <MiniAvatar name={n.actor_display_name} url={n.actor_avatar_url} size={34} />
+                                ) : (
+                                  // System notification (milestone / anonymous answer) — no actor to show.
+                                  <span className="w-[34px] h-[34px] rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                                    {n.type.startsWith("milestone_")
+                                      ? <ChevronUp className="w-4 h-4 text-secondary" />
+                                      : <MessageCircle className="w-4 h-4 text-secondary" />}
+                                  </span>
+                                )}
                                 <div className="flex-1 min-w-0">
                                   <p className="text-sm leading-snug">
-                                    <Link href={`/profile/${n.actor_username}`} onClick={() => setNotifOpen(false)} className="font-semibold text-foreground no-underline hover:underline">
-                                      {n.actor_display_name}
-                                    </Link>
-                                    {" started following you"}
+                                    {n.actor_username && (
+                                      <Link href={`/profile/${n.actor_username}`} onClick={() => setNotifOpen(false)} className="font-semibold text-foreground no-underline hover:underline">
+                                        {n.actor_display_name}
+                                      </Link>
+                                    )}
+                                    {notifHref(n) ? (
+                                      <Link href={notifHref(n)!} onClick={() => setNotifOpen(false)} className="text-foreground no-underline hover:underline">
+                                        {notifText(n)}
+                                      </Link>
+                                    ) : (
+                                      notifText(n)
+                                    )}
                                   </p>
                                   <p className="text-[11px] text-muted-foreground mt-0.5">{timeAgo(n.created_at)}</p>
                                 </div>
@@ -510,6 +656,7 @@ export default function ProfilePage() {
                           </>
                         )}
                       </div>
+                      )}
                     </div>
                   </>
                 )}
@@ -556,6 +703,13 @@ export default function ProfilePage() {
                   <Pencil className="w-3.5 h-3.5" />
                   {editing ? "Cancel" : "Edit profile"}
                 </Button>
+                <Link
+                  href="/saved"
+                  className="flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-md border border-input bg-background text-foreground hover:bg-muted transition-colors no-underline"
+                >
+                  <Bookmark className="w-3.5 h-3.5" />
+                  Saved
+                </Link>
                 <button
                   onClick={handleLogout}
                   className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors ml-1"
@@ -681,6 +835,49 @@ export default function ProfilePage() {
                 {saving ? "Saving…" : "Save changes"}
               </Button>
             </form>
+
+            {/* Danger zone — permanent account deletion */}
+            <div className="mt-5 pt-4 border-t border-destructive/20">
+              {!deleteOpen ? (
+                <button
+                  onClick={() => { setDeleteOpen(true); setDeletePassword(""); setDeleteError(null); }}
+                  className="flex items-center gap-1.5 text-xs text-destructive/70 hover:text-destructive transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete account
+                </button>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    This <strong className="text-destructive">permanently deletes</strong> your account:
+                    your profile, messages, votes, and memberships are removed. Your posts stay
+                    but lose their author. This cannot be undone.
+                  </p>
+                  <input
+                    type="password"
+                    value={deletePassword}
+                    onChange={(e) => setDeletePassword(e.target.value)}
+                    placeholder="Confirm your password"
+                    autoComplete="current-password"
+                    className="w-full h-9 px-3 text-sm border border-input rounded-lg bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-destructive/40"
+                  />
+                  {deleteError && <p className="text-xs text-destructive">{deleteError}</p>}
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      onClick={handleDeleteAccount}
+                      disabled={deleting || deletePassword.length < 8}
+                      className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                    >
+                      {deleting ? "Deleting…" : "Delete my account"}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setDeleteOpen(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

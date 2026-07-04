@@ -12,6 +12,7 @@ import {
   X,
   ArrowLeft,
   CornerDownRight,
+  Pencil,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import UserSearchInput from "@/components/UserSearchInput";
@@ -20,6 +21,9 @@ import { ImageGrid } from "@/components/ImageGrid";
 import { FileAttachmentList } from "@/components/FileAttachmentList";
 import type { FileAttachment } from "@/components/FileUploader";
 import MiniAvatar from "@/components/MiniAvatar";
+import BookmarkButton from "@/components/BookmarkButton";
+import MentionSuggestions from "@/components/MentionSuggestions";
+import { Linkify } from "@/lib/linkify";
 import { timeAgo } from "@/lib/timeAgo";
 import { lastVisitedPath } from "@/lib/navHistory";
 import { Button } from "@/components/ui/button";
@@ -47,7 +51,9 @@ interface Post {
   reply_count: number;
   share_count: number;
   created_at: string;
+  edited_at: string | null;
   is_deleted: boolean;
+  is_bookmarked: boolean;
 }
 
 interface VoteResponse {
@@ -72,6 +78,7 @@ interface ThreadCtx {
   inlineError: string | null;
   onVote: (id: string, type: "up" | "down") => void;
   onDelete: (id: string) => void;
+  onEdited: (id: string, content: string, editedAt: string | null) => void;
   onStartReply: (id: string) => void;
   onSetContent: (v: string) => void;
   onSetAttachments: (imageUrls: string[], fileAttachments: FileAttachment[], uploading: boolean) => void;
@@ -178,6 +185,28 @@ function CommentNode({ node, depth }: { node: TreeNode; depth: number }) {
   const voted = p.current_user_vote;
   const indent = Math.min(depth, 4) * 14;
   const isCutOff = node.children.length === 0 && p.reply_count > 0;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(p.content);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [replyCaret, setReplyCaret] = useState<number | null>(null);
+
+  async function saveEdit() {
+    const next = draft.trim();
+    if (!next || next === p.content) { setEditing(false); return; }
+    setSavingEdit(true);
+    try {
+      const res = await apiFetch<{ content: string; edited_at: string | null }>(
+        `/api/posts/${p.id}`,
+        { method: "PATCH", body: JSON.stringify({ content: next }) }
+      );
+      ctx.onEdited(p.id, res.content, res.edited_at);
+      setEditing(false);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Could not save edit.");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
 
   return (
     <div className="mb-1">
@@ -201,6 +230,7 @@ function CommentNode({ node, depth }: { node: TreeNode; depth: number }) {
                   <span>@{p.author?.username ?? "?"}</span>
                 </Link>
                 <span> · {timeAgo(p.created_at)}</span>
+                {p.edited_at && <span className="italic"> · edited</span>}
               </div>
             </div>
 
@@ -213,9 +243,32 @@ function CommentNode({ node, depth }: { node: TreeNode; depth: number }) {
               </div>
             )}
 
-            {/* Comment content */}
-            {p.content && (
-              <p className="text-sm leading-relaxed whitespace-pre-wrap mb-1.5">{p.content}</p>
+            {/* Comment content — swaps to an inline editor for the author */}
+            {editing ? (
+              <div className="mb-1.5 space-y-2">
+                <textarea
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  rows={Math.min(6, Math.max(2, draft.split("\n").length + 1))}
+                  autoFocus
+                  className="w-full resize-none text-sm leading-relaxed bg-muted rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <div className="flex items-center gap-2 justify-end">
+                  <button
+                    onClick={() => { setEditing(false); setDraft(p.content); }}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1"
+                  >
+                    Cancel
+                  </button>
+                  <Button size="sm" onClick={saveEdit} disabled={savingEdit || !draft.trim()}>
+                    {savingEdit ? "Saving…" : "Save"}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              p.content && (
+                <p className="text-sm leading-relaxed mb-1.5"><Linkify text={p.content} /></p>
+              )
             )}
 
             {/* Comment actions */}
@@ -254,12 +307,24 @@ function CommentNode({ node, depth }: { node: TreeNode; depth: number }) {
               </button>
               <SharePanel postId={p.id} shareCount={p.share_count} />
               {isOwn && (
-                <button
-                  onClick={() => ctx.onDelete(p.id)}
-                  className="ml-auto flex items-center px-1.5 py-1 rounded-md text-muted-foreground/40 hover:text-destructive hover:bg-destructive/5 transition-colors"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </button>
+                <div className="ml-auto flex items-center">
+                  {p.content && (
+                    <button
+                      onClick={() => { setDraft(p.content); setEditing(true); }}
+                      aria-label="Edit comment"
+                      className="flex items-center px-1.5 py-1 rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-muted transition-colors"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => ctx.onDelete(p.id)}
+                    aria-label="Delete comment"
+                    className="flex items-center px-1.5 py-1 rounded-md text-muted-foreground/40 hover:text-destructive hover:bg-destructive/5 transition-colors"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
               )}
             </div>
           </>
@@ -268,14 +333,23 @@ function CommentNode({ node, depth }: { node: TreeNode; depth: number }) {
         {/* Inline reply form */}
         {isReplying && (
           <div className="mb-3 space-y-2">
-            <textarea
-              value={ctx.inlineContent}
-              onChange={(e) => ctx.onSetContent(e.target.value)}
-              placeholder={`Reply to ${p.author?.display_name ?? "comment"}…`}
-              rows={2}
-              autoFocus
-              className="w-full resize-none text-sm px-3 py-2 border border-input rounded-xl bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-            />
+            <div className="relative">
+              <textarea
+                value={ctx.inlineContent}
+                onChange={(e) => { ctx.onSetContent(e.target.value); setReplyCaret(e.target.selectionStart); }}
+                onKeyUp={(e) => setReplyCaret(e.currentTarget.selectionStart)}
+                onClick={(e) => setReplyCaret(e.currentTarget.selectionStart)}
+                placeholder={`Reply to ${p.author?.display_name ?? "comment"}…`}
+                rows={2}
+                autoFocus
+                className="w-full resize-none text-sm px-3 py-2 border border-input rounded-xl bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <MentionSuggestions
+                value={ctx.inlineContent}
+                caret={replyCaret}
+                onPick={(v, c) => { ctx.onSetContent(v); setReplyCaret(c); }}
+              />
+            </div>
             <AttachBar onChange={ctx.onSetAttachments} />
             {ctx.inlineError && <p className="text-xs text-destructive">{ctx.inlineError}</p>}
             <div className="flex gap-2">
@@ -334,12 +408,17 @@ export default function PostDetailPage() {
   const [loading, setLoading] = useState(true);
 
   const [topContent, setTopContent] = useState("");
+  const [topCaret, setTopCaret] = useState<number | null>(null);
   const [topImageUrls, setTopImageUrls] = useState<string[]>([]);
   const [topFileAttachments, setTopFileAttachments] = useState<FileAttachment[]>([]);
   const [topUploading, setTopUploading] = useState(false);
   const [topUploaderKey, setTopUploaderKey] = useState(0);
   const [topSubmitting, setTopSubmitting] = useState(false);
   const [topError, setTopError] = useState<string | null>(null);
+
+  const [editingPost, setEditingPost] = useState(false);
+  const [postDraft, setPostDraft] = useState("");
+  const [savingPostEdit, setSavingPostEdit] = useState(false);
 
   const [replyingToId, setReplyingToId] = useState<string | null>(null);
   const [inlineContent, setInlineContent] = useState("");
@@ -384,6 +463,30 @@ export default function PostDetailPage() {
       );
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : "Could not delete.");
+    }
+  }
+
+  function handleEdited(targetId: string, content: string, editedAt: string | null) {
+    setPost((prev) => (prev?.id === targetId ? { ...prev, content, edited_at: editedAt } : prev));
+    setAllReplies((prev) => prev.map((p) => (p.id === targetId ? { ...p, content, edited_at: editedAt } : p)));
+  }
+
+  async function savePostEdit() {
+    if (!post) return;
+    const next = postDraft.trim();
+    if (!next || next === post.content) { setEditingPost(false); return; }
+    setSavingPostEdit(true);
+    try {
+      const res = await apiFetch<{ content: string; edited_at: string | null }>(
+        `/api/posts/${post.id}`,
+        { method: "PATCH", body: JSON.stringify({ content: next }) }
+      );
+      handleEdited(post.id, res.content, res.edited_at);
+      setEditingPost(false);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Could not save edit.");
+    } finally {
+      setSavingPostEdit(false);
     }
   }
 
@@ -461,6 +564,7 @@ export default function PostDetailPage() {
     inlineError,
     onVote: handleVote,
     onDelete: handleDelete,
+    onEdited: handleEdited,
     onStartReply: startInlineReply,
     onSetContent: setInlineContent,
     onSetAttachments: (imageUrls, fileAttachments, uploading) => {
@@ -505,6 +609,7 @@ export default function PostDetailPage() {
                     </span>
                   </Link>
                   <span className="text-muted-foreground text-xs"> · {timeAgo(post.created_at)}</span>
+                  {post.edited_at && <span className="text-muted-foreground text-xs italic"> · edited</span>}
                 </div>
                 {post.faculty_tag && (
                   <span className="text-[11px] font-semibold tracking-wide px-2 py-0.5 rounded-full bg-muted text-muted-foreground flex-shrink-0">
@@ -527,11 +632,34 @@ export default function PostDetailPage() {
                 </div>
               )}
 
-              {/* Post content */}
-              {post.content && (
-                <p className="px-4 pb-3 text-sm leading-relaxed whitespace-pre-wrap text-foreground">
-                  {post.content}
-                </p>
+              {/* Post content — swaps to an inline editor for the author */}
+              {editingPost ? (
+                <div className="px-4 pb-3 space-y-2">
+                  <textarea
+                    value={postDraft}
+                    onChange={(e) => setPostDraft(e.target.value)}
+                    rows={Math.min(8, Math.max(3, postDraft.split("\n").length + 1))}
+                    autoFocus
+                    className="w-full resize-none text-sm leading-relaxed bg-muted rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring text-foreground"
+                  />
+                  <div className="flex items-center gap-2 justify-end">
+                    <button
+                      onClick={() => setEditingPost(false)}
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1"
+                    >
+                      Cancel
+                    </button>
+                    <Button size="sm" onClick={savePostEdit} disabled={savingPostEdit || !postDraft.trim()}>
+                      {savingPostEdit ? "Saving…" : "Save"}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                post.content && (
+                  <p className="px-4 pb-3 text-sm leading-relaxed text-foreground">
+                    <Linkify text={post.content} />
+                  </p>
+                )
               )}
 
               {/* Post actions */}
@@ -561,13 +689,26 @@ export default function PostDetailPage() {
                   {post.reply_count} {post.reply_count === 1 ? "comment" : "comments"}
                 </span>
                 <SharePanel postId={post.id} shareCount={post.share_count} />
+                <BookmarkButton postId={post.id} initialBookmarked={post.is_bookmarked} />
                 {isOwnPost && (
-                  <button
-                    onClick={() => handleDelete(post.id)}
-                    className="ml-auto flex items-center px-2.5 py-1.5 rounded-lg text-muted-foreground/40 hover:text-destructive hover:bg-destructive/5 transition-colors"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="ml-auto flex items-center">
+                    {post.content && (
+                      <button
+                        onClick={() => { setPostDraft(post.content); setEditingPost(true); }}
+                        aria-label="Edit post"
+                        className="flex items-center px-2.5 py-1.5 rounded-lg text-muted-foreground/40 hover:text-foreground hover:bg-muted transition-colors"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDelete(post.id)}
+                      aria-label="Delete post"
+                      className="flex items-center px-2.5 py-1.5 rounded-lg text-muted-foreground/40 hover:text-destructive hover:bg-destructive/5 transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 )}
               </div>
             </>
@@ -577,13 +718,22 @@ export default function PostDetailPage() {
         {/* Inline comment composer */}
         <div className="bg-white rounded-2xl shadow-sm overflow-hidden mb-4">
           <form onSubmit={handleTopReply} className="px-4 py-3 space-y-3">
-            <textarea
-              value={topContent}
-              onChange={(e) => setTopContent(e.target.value)}
-              placeholder="Add a comment…"
-              rows={3}
-              className="w-full resize-none text-sm placeholder:text-muted-foreground border border-input rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-            />
+            <div className="relative">
+              <textarea
+                value={topContent}
+                onChange={(e) => { setTopContent(e.target.value); setTopCaret(e.target.selectionStart); }}
+                onKeyUp={(e) => setTopCaret(e.currentTarget.selectionStart)}
+                onClick={(e) => setTopCaret(e.currentTarget.selectionStart)}
+                placeholder="Add a comment… Tag people with @username"
+                rows={3}
+                className="w-full resize-none text-sm placeholder:text-muted-foreground border border-input rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <MentionSuggestions
+                value={topContent}
+                caret={topCaret}
+                onPick={(v, c) => { setTopContent(v); setTopCaret(c); }}
+              />
+            </div>
             <div className="flex items-center gap-2 flex-wrap">
               <AttachBar
                 key={topUploaderKey}

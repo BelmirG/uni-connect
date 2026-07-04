@@ -114,14 +114,18 @@ async def search_users(
         return []
     pattern = f"%{q.strip()}%"
     rows = (await db.execute(
-        select(User.username, User.display_name)
+        select(User.username, User.display_name, User.avatar_url)
         .where(
             User.id != current_user.id,
+            User.is_active == True,
             or_(User.username.ilike(pattern), User.display_name.ilike(pattern)),
         )
         .limit(10)
     )).all()
-    return [{"username": r.username, "display_name": r.display_name} for r in rows]
+    return [
+        {"username": r.username, "display_name": r.display_name, "avatar_url": r.avatar_url}
+        for r in rows
+    ]
 
 
 @router.get("")
@@ -551,6 +555,14 @@ async def dm_websocket(websocket: WebSocket, conversation_id: str):
                 try:
                     data = json.loads(text)
                 except json.JSONDecodeError:
+                    continue
+
+                # Ephemeral typing signal — broadcast to the conversation, never persisted.
+                if data.get("event") == "typing":
+                    await redis.publish(channel, json.dumps({
+                        "event": "typing",
+                        "username": user.username,
+                    }))
                     continue
 
                 content = (data.get("content") or "").strip()

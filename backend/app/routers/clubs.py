@@ -9,6 +9,7 @@ from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.notify import notify
 from app.core.redis import redis
 from app.database import get_db
 from app.dependencies import get_current_user
@@ -325,7 +326,8 @@ async def join_club(
     if await _get_membership(club.id, current_user.id, db):
         raise HTTPException(status_code=409, detail="You are already a member.")
 
-    if club.is_private:
+    is_request = club.is_private
+    if is_request:
         # Private clubs require owner approval — create a join request instead
         if await _get_join_request(club.id, current_user.id, db):
             raise HTTPException(status_code=409, detail="You already have a pending join request.")
@@ -334,6 +336,24 @@ async def join_club(
         db.add(ClubMember(club_id=club.id, user_id=current_user.id, role="member"))
 
     await db.commit()
+
+    if is_request:
+        # Ping everyone who can act on the request (owner + moderators).
+        approvers = (await db.execute(
+            select(ClubMember.user_id).where(
+                ClubMember.club_id == club.id,
+                ClubMember.role.in_(("owner", "moderator")),
+            )
+        )).scalars().all()
+        for approver_id in approvers:
+            await notify(
+                db,
+                user_id=approver_id,
+                type="club_join_request",
+                actor=current_user,
+                reference_id=club.id,
+                extra={"club_name": club.name, "club_slug": club.slug},
+            )
 
     row = (await db.execute(_build_club_select(current_user.id, Club.slug == slug))).first()
     return _row_to_club(row)
@@ -532,6 +552,15 @@ async def approve_join_request(
     db.add(ClubMember(club_id=club.id, user_id=target.id, role="member"))
     await db.commit()
 
+    await notify(
+        db,
+        user_id=target.id,
+        type="club_approved",
+        actor=current_user,
+        reference_id=club.id,
+        extra={"club_name": club.name, "club_slug": club.slug},
+    )
+
 
 @router.delete("/{slug}/requests/{username}", status_code=status.HTTP_204_NO_CONTENT)
 async def reject_or_cancel_join_request(
@@ -652,6 +681,8 @@ async def invite_member(
         "actor_avatar_url": current_user.avatar_url,
         "club_name": club.name,
         "club_slug": club.slug,
+        # Muted category → the invite still shows in the bell, no popup.
+        "silent": "clubs" in (target.muted_notifications or []),
     }))
 
 
@@ -730,8 +761,23 @@ async def update_member_role(
     if not target_membership:
         raise HTTPException(status_code=404, detail="That user is not a member of this club.")
 
+    was_promoted = (
+        body.role in ("moderator", "owner") and target_membership.role != body.role
+    )
     target_membership.role = body.role
     await db.commit()
+
+    # Promotions are worth celebrating; demotions stay quiet.
+    if was_promoted:
+        await notify(
+            db,
+            user_id=target.id,
+            type=f"club_role_{body.role}",
+            actor=current_user,
+            reference_id=club.id,
+            payload_type="club_role",
+            extra={"club_name": club.name, "club_slug": club.slug, "role": body.role},
+        )
 
 
 @router.post("/{slug}/posts/{post_id}/pin", status_code=status.HTTP_204_NO_CONTENT)

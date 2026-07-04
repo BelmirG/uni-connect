@@ -116,6 +116,22 @@
   animation: votePop 0.35s cubic-bezier(0.2, 0, 0, 1);
 }
 
+/* Chat typing indicator — three dots pulsing in sequence. */
+@keyframes typingPulse {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30%           { opacity: 1;   transform: translateY(-3px); }
+}
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: hsl(var(--muted-foreground));
+  animation: typingPulse 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .typing-dot { animation: none; opacity: 0.6; }
+}
+
 @keyframes pageEnter {
   from {
     opacity: 0;

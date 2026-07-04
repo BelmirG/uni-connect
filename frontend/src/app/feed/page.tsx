@@ -11,6 +11,7 @@ import {
   Trash2,
   X,
   PenLine,
+  Pencil,
   Search as SearchIcon,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
@@ -23,8 +24,11 @@ import { ImageGrid } from "@/components/ImageGrid";
 import { FileUploader, FileAttachment } from "@/components/FileUploader";
 import { FileAttachmentList } from "@/components/FileAttachmentList";
 import MiniAvatar from "@/components/MiniAvatar";
+import BookmarkButton from "@/components/BookmarkButton";
+import MentionSuggestions from "@/components/MentionSuggestions";
 import PollComposer, { PollDraft } from "@/components/PollComposer";
 import PollDisplay from "@/components/PollDisplay";
+import { Linkify } from "@/lib/linkify";
 import { FACULTIES, FACULTY_NAMES, Faculty } from "@/lib/faculties";
 import { timeAgo } from "@/lib/timeAgo";
 import { Button } from "@/components/ui/button";
@@ -60,6 +64,8 @@ interface Post {
   share_count: number;
   poll: Poll | null;
   created_at: string;
+  edited_at: string | null;
+  is_bookmarked: boolean;
 }
 
 interface PostListResponse {
@@ -89,6 +95,8 @@ export default function FeedPage() {
   const [currentUsername, setCurrentUsername] = useState<string | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const [content, setContent] = useState("");
+  const [caret, setCaret] = useState<number | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [postFacultyTag, setPostFacultyTag] = useState<Faculty | "">("");
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [imagesUploading, setImagesUploading] = useState(false);
@@ -302,13 +310,30 @@ export default function FeedPage() {
           className="mb-4"
         >
           <form onSubmit={handlePost} className="px-4 pt-3 pb-3 space-y-3">
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="What's on your mind?"
-              rows={4}
-              className="w-full resize-none text-sm bg-transparent focus:outline-none text-on-surface placeholder:text-on-surface-variant/60"
-            />
+            <div className="relative">
+              <textarea
+                ref={composerRef}
+                value={content}
+                onChange={(e) => { setContent(e.target.value); setCaret(e.target.selectionStart); }}
+                onKeyUp={(e) => setCaret(e.currentTarget.selectionStart)}
+                onClick={(e) => setCaret(e.currentTarget.selectionStart)}
+                placeholder="What's on your mind? Tag people with @username"
+                rows={4}
+                className="w-full resize-none text-sm bg-transparent focus:outline-none text-on-surface placeholder:text-on-surface-variant/60"
+              />
+              <MentionSuggestions
+                value={content}
+                caret={caret}
+                onPick={(newValue, newCaret) => {
+                  setContent(newValue);
+                  setCaret(newCaret);
+                  requestAnimationFrame(() => {
+                    composerRef.current?.focus();
+                    composerRef.current?.setSelectionRange(newCaret, newCaret);
+                  });
+                }}
+              />
+            </div>
             <div className="border-t border-outline-variant/40 pt-2 space-y-3">
               <ImageUploader
                 key={uploaderKey}
@@ -366,6 +391,9 @@ export default function FeedPage() {
               currentUsername={currentUsername}
               onVote={handleVote}
               onDelete={handleDelete}
+              onEdited={(id, newContent, editedAt) =>
+                setPosts((prev) => prev.map((p) => (p.id === id ? { ...p, content: newContent, edited_at: editedAt } : p)))
+              }
               onPollUpdate={(id, poll) =>
                 setPosts((prev) => prev.map((p) => (p.id === id ? { ...p, poll } : p)))
               }
@@ -486,16 +514,42 @@ function PostCard({
   currentUsername,
   onVote,
   onDelete,
+  onEdited,
   onPollUpdate,
 }: {
   post: Post;
   currentUsername: string | null;
   onVote: (id: string, type: "up" | "down") => void;
   onDelete: (id: string) => void;
+  onEdited: (id: string, content: string, editedAt: string | null) => void;
   onPollUpdate: (postId: string, poll: Poll) => void;
 }) {
   const voted = post.current_user_vote;
   const isOwn = currentUsername !== null && post.author?.username === currentUsername;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(post.content);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  async function saveEdit() {
+    const next = draft.trim();
+    if (!next || next === post.content) {
+      setEditing(false);
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      const res = await apiFetch<{ content: string; edited_at: string | null }>(
+        `/api/posts/${post.id}`,
+        { method: "PATCH", body: JSON.stringify({ content: next }) }
+      );
+      onEdited(post.id, res.content, res.edited_at);
+      setEditing(false);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Could not save edit.");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
 
   return (
     <div className="bg-surface rounded-2xl shadow-sm overflow-hidden">
@@ -516,6 +570,7 @@ function PostCard({
           </Link>
           <p className="text-[11px] text-on-surface-variant mt-0.5">
             {timeAgo(post.created_at)}
+            {post.edited_at && <span className="italic"> · edited</span>}
             {post.faculty_tag && (
               <span> · {post.faculty_tag}</span>
             )}
@@ -523,11 +578,34 @@ function PostCard({
         </div>
       </div>
 
-      {/* Content */}
-      {post.content && (
-        <p className="px-4 pb-3 text-body-sm leading-relaxed whitespace-pre-wrap text-on-surface">
-          {post.content}
-        </p>
+      {/* Content — swaps to an inline editor for the author */}
+      {editing ? (
+        <div className="px-4 pb-3 space-y-2">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={Math.min(8, Math.max(3, draft.split("\n").length + 1))}
+            autoFocus
+            className="w-full resize-none text-body-sm leading-relaxed bg-surface-container-low rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring text-on-surface"
+          />
+          <div className="flex items-center gap-2 justify-end">
+            <button
+              onClick={() => { setEditing(false); setDraft(post.content); }}
+              className="text-xs text-on-surface-variant hover:text-on-surface transition-colors px-2 py-1"
+            >
+              Cancel
+            </button>
+            <Button size="sm" onClick={saveEdit} disabled={savingEdit || !draft.trim()}>
+              {savingEdit ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        post.content && (
+          <p className="px-4 pb-3 text-body-sm leading-relaxed text-on-surface">
+            <Linkify text={post.content} />
+          </p>
+        )
       )}
 
       {/* Images */}
@@ -594,14 +672,29 @@ function PostCard({
         {/* Share */}
         <SharePanel postId={post.id} shareCount={post.share_count} />
 
-        {/* Delete (own posts) */}
+        {/* Save */}
+        <BookmarkButton postId={post.id} initialBookmarked={post.is_bookmarked} />
+
+        {/* Edit + delete (own posts) */}
         {isOwn && (
-          <button
-            onClick={() => onDelete(post.id)}
-            className="ml-auto flex items-center px-2 py-1.5 rounded-lg text-on-surface-variant/40 hover:text-error hover:bg-error-container/30 transition-colors"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+          <div className="ml-auto flex items-center">
+            {post.content && (
+              <button
+                onClick={() => { setDraft(post.content); setEditing(true); }}
+                aria-label="Edit post"
+                className="flex items-center px-2 py-1.5 rounded-lg text-on-surface-variant/40 hover:text-on-surface hover:bg-surface-container-low transition-colors"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+            )}
+            <button
+              onClick={() => onDelete(post.id)}
+              aria-label="Delete post"
+              className="flex items-center px-2 py-1.5 rounded-lg text-on-surface-variant/40 hover:text-error hover:bg-error-container/30 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
         )}
       </div>
     </div>

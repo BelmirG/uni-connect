@@ -2,12 +2,15 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import and_, case, func, literal, literal_column, select, text
+from sqlalchemy import and_, case, func, literal, literal_column, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.mentions import extract_mention_usernames, notify_post_mentions
+from app.core.notify import notify
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.models.bookmark import Bookmark
 from app.models.club import Club
 from app.models.club_member import ClubMember
 from app.models.direct_message import DirectMessage
@@ -19,6 +22,7 @@ from app.models.vote import Vote
 from app.schemas.post import (
     AuthorInfo,
     CreatePostRequest,
+    EditPostRequest,
     PollOptionResponse,
     PollResponse,
     PollVoteRequest,
@@ -124,6 +128,19 @@ async def _user_votes(
     return {row.post_id: row.vote_type for row in result}
 
 
+async def _user_bookmarks(
+    post_ids: list[uuid.UUID], user_id: uuid.UUID, db: AsyncSession
+) -> set[uuid.UUID]:
+    if not post_ids:
+        return set()
+    result = await db.execute(
+        select(Bookmark.post_id).where(
+            Bookmark.post_id.in_(post_ids), Bookmark.user_id == user_id
+        )
+    )
+    return {row[0] for row in result}
+
+
 async def _load_polls(
     post_ids: list[uuid.UUID], user_id: uuid.UUID, db: AsyncSession
 ) -> dict[uuid.UUID, PollResponse]:
@@ -192,7 +209,9 @@ async def _load_polls(
     return result
 
 
-def _row_to_response(row, current_vote: str | None, poll: PollResponse | None = None) -> PostResponse:
+def _row_to_response(
+    row, current_vote: str | None, poll: PollResponse | None = None, is_bookmarked: bool = False
+) -> PostResponse:
     post, username, display_name, avatar_url, upvotes, downvotes, reply_count, share_count, *_ = row
     return PostResponse(
         id=post.id,
@@ -209,8 +228,10 @@ def _row_to_response(row, current_vote: str | None, poll: PollResponse | None = 
         share_count=share_count or 0,
         poll=poll,
         created_at=post.created_at,
+        edited_at=post.edited_at,
         is_deleted=post.is_deleted,
         is_pinned=post.is_pinned,
+        is_bookmarked=is_bookmarked,
         parent_post_id=post.parent_post_id,
     )
 
@@ -274,6 +295,8 @@ async def create_post(
 
     await db.commit()
     await db.refresh(post)
+
+    await notify_post_mentions(post.content, post, current_user, db)
 
     return PostResponse(
         id=post.id,
@@ -349,9 +372,10 @@ async def list_posts(
     post_ids = [r[0].id for r in rows]
     votes = await _user_votes(post_ids, current_user.id, db)
     polls = await _load_polls(post_ids, current_user.id, db)
+    saved = await _user_bookmarks(post_ids, current_user.id, db)
 
     return PostListResponse(
-        posts=[_row_to_response(r, votes.get(r[0].id), polls.get(r[0].id)) for r in rows],
+        posts=[_row_to_response(r, votes.get(r[0].id), polls.get(r[0].id), r[0].id in saved) for r in rows],
         total=total,
     )
 
@@ -388,10 +412,61 @@ async def search_posts(
     post_ids = [r[0].id for r in rows]
     votes = await _user_votes(post_ids, current_user.id, db)
     polls = await _load_polls(post_ids, current_user.id, db)
+    saved = await _user_bookmarks(post_ids, current_user.id, db)
 
     return PostListResponse(
-        posts=[_row_to_response(r, votes.get(r[0].id), polls.get(r[0].id)) for r in rows],
+        posts=[_row_to_response(r, votes.get(r[0].id), polls.get(r[0].id), r[0].id in saved) for r in rows],
         total=len(rows),
+    )
+
+
+@router.get("/saved", response_model=PostListResponse)
+async def list_saved_posts(
+    limit: int = 20,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """The current user's bookmarked posts, most recently saved first.
+
+    Private-club posts are filtered out unless the user is still a member — a
+    bookmark made while inside a club must not keep leaking content after leaving.
+    """
+    saved_order = (
+        select(Bookmark.post_id, Bookmark.created_at)
+        .where(Bookmark.user_id == current_user.id)
+        .subquery()
+    )
+    still_visible = or_(
+        Post.club_id.is_(None),
+        ~Post.club_id.in_(select(Club.id).where(Club.is_private == True)),
+        select(ClubMember.user_id)
+        .where(ClubMember.club_id == Post.club_id, ClubMember.user_id == current_user.id)
+        .exists(),
+    )
+    where = and_(Post.id == saved_order.c.post_id, Post.is_deleted == False, still_visible)
+
+    total = (await db.execute(
+        select(func.count()).select_from(
+            select(Post.id).join(saved_order, Post.id == saved_order.c.post_id)
+            .where(Post.is_deleted == False, still_visible).subquery()
+        )
+    )).scalar() or 0
+
+    rows = (await db.execute(
+        _build_post_select(where)
+        .order_by(saved_order.c.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )).all()
+
+    post_ids = [r[0].id for r in rows]
+    votes = await _user_votes(post_ids, current_user.id, db)
+    polls = await _load_polls(post_ids, current_user.id, db)
+
+    return PostListResponse(
+        posts=[_row_to_response(r, votes.get(r[0].id), polls.get(r[0].id), True) for r in rows],
+        total=total,
     )
 
 
@@ -411,7 +486,8 @@ async def get_post(
 
     vote_map = await _user_votes([post_id], current_user.id, db)
     poll_map = await _load_polls([post_id], current_user.id, db)
-    post_response = _row_to_response(row, vote_map.get(post_id), poll_map.get(post_id))
+    saved_map = await _user_bookmarks([post_id], current_user.id, db)
+    post_response = _row_to_response(row, vote_map.get(post_id), poll_map.get(post_id), post_id in saved_map)
 
     MAX_DEPTH = 6
     seed = select(Post.id.label("id"), literal(0).label("depth")).where(Post.parent_post_id == post_id)
@@ -468,6 +544,32 @@ async def create_reply(
     await db.commit()
     await db.refresh(reply)
 
+    # Mentions in a reply deep-link to the top-level thread so the notification
+    # lands somewhere useful (only thread roots have their own route). Walk up the
+    # parent chain — replies are capped at depth 6 so this is at most a few hops.
+    thread_root = parent
+    while thread_root.parent_post_id is not None:
+        thread_root = (await db.execute(
+            select(Post).where(Post.id == thread_root.parent_post_id)
+        )).scalar_one()
+    await notify_post_mentions(reply.content, thread_root, current_user, db)
+
+    # Tell the parent's author someone replied — unless they replied to themselves,
+    # or they're @mentioned in the reply (the mention notification already covers it).
+    if parent.author_id and parent.author_id != current_user.id:
+        parent_author = (await db.execute(
+            select(User).where(User.id == parent.author_id)
+        )).scalar_one_or_none()
+        if parent_author and parent_author.username.lower() not in extract_mention_usernames(reply.content):
+            await notify(
+                db,
+                user_id=parent.author_id,
+                type="reply",
+                actor=current_user,
+                reference_id=thread_root.id,
+                extra={"post_id": str(thread_root.id)},
+            )
+
     return PostResponse(
         id=reply.id,
         content=reply.content,
@@ -523,7 +625,39 @@ async def vote_post(
         db.add(Vote(post_id=post_id, user_id=current_user.id, vote_type=body.vote_type))
 
     await db.commit()
-    return await _vote_counts(post_id, current_user.id, db)
+    result = await _vote_counts(post_id, current_user.id, db)
+
+    # Milestone notification: fires once per threshold, only when an upvote landed
+    # (not when one was toggled off), never for votes on your own post. The stored
+    # type encodes the threshold ("milestone_10") so the existence check is exact.
+    MILESTONES = (5, 10, 25, 50, 100)
+    if (
+        result.current_user_vote == "up"
+        and result.upvotes in MILESTONES
+        and post.author_id
+        and post.author_id != current_user.id
+    ):
+        from app.models.notification import Notification
+        mtype = f"milestone_{result.upvotes}"
+        already = (await db.execute(
+            select(Notification.id).where(
+                Notification.user_id == post.author_id,
+                Notification.type == mtype,
+                Notification.reference_id == post.id,
+            )
+        )).first()
+        if not already:
+            await notify(
+                db,
+                user_id=post.author_id,
+                type=mtype,
+                actor=None,  # many people voted — no single actor
+                reference_id=post.id,
+                payload_type="milestone",
+                extra={"count": result.upvotes, "post_id": str(post.id)},
+            )
+
+    return result
 
 
 @router.post("/{post_id}/poll-vote")
@@ -570,6 +704,79 @@ async def poll_vote(
 
     polls = await _load_polls([post_id], current_user.id, db)
     return polls.get(post_id)
+
+
+@router.patch("/{post_id}")
+async def edit_post(
+    post_id: uuid.UUID,
+    body: EditPostRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Author-only content edit. Sets edited_at so the UI can show an 'edited' badge.
+    Attachments, polls, and post type are immutable — only the text changes."""
+    post = (
+        await db.execute(
+            select(Post).where(Post.id == post_id, Post.is_deleted == False)
+        )
+    ).scalar_one_or_none()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found.")
+    if post.author_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only edit your own posts.")
+
+    new_content = body.content.strip()
+    if new_content != post.content:
+        # Notify only people who weren't mentioned before this edit — no duplicate pings.
+        from app.core.mentions import extract_mention_usernames
+        old_names = extract_mention_usernames(post.content)
+        post.content = new_content
+        post.edited_at = datetime.now(timezone.utc)
+        await db.commit()
+
+        added = extract_mention_usernames(new_content) - old_names
+        if added:
+            thread_root = post
+            while thread_root.parent_post_id is not None:
+                thread_root = (await db.execute(
+                    select(Post).where(Post.id == thread_root.parent_post_id)
+                )).scalar_one()
+            await notify_post_mentions(" ".join(f"@{n}" for n in added), thread_root, current_user, db)
+
+    return {"content": post.content, "edited_at": post.edited_at.isoformat() if post.edited_at else None}
+
+
+@router.post("/{post_id}/bookmark")
+async def toggle_bookmark(
+    post_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Toggle save/un-save. Same pattern as voting: acting twice undoes the action."""
+    post = (
+        await db.execute(
+            select(Post).where(Post.id == post_id, Post.is_deleted == False)
+        )
+    ).scalar_one_or_none()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found.")
+    await _guard_private_club_post(post, current_user.id, db)
+
+    existing = (
+        await db.execute(
+            select(Bookmark).where(Bookmark.post_id == post_id, Bookmark.user_id == current_user.id)
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        await db.delete(existing)
+        bookmarked = False
+    else:
+        db.add(Bookmark(post_id=post_id, user_id=current_user.id))
+        bookmarked = True
+
+    await db.commit()
+    return {"is_bookmarked": bookmarked}
 
 
 @router.delete("/{post_id}", status_code=status.HTTP_204_NO_CONTENT)

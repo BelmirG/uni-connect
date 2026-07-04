@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.mentions import extract_mention_usernames
 from app.core.redis import redis
 from app.core.security import decode_access_token
 from app.database import AsyncSessionLocal, get_db
@@ -13,9 +14,52 @@ from app.dependencies import get_current_user
 from app.models.chat_message import ChatMessage
 from app.models.club import Club
 from app.models.club_member import ClubMember
+from app.models.notification import Notification
 from app.models.user import User
 
 router = APIRouter(prefix="/api/clubs", tags=["chat"])
+
+
+async def _notify_chat_mentions(content: str, club: Club, actor: User, db) -> None:
+    """Persist + push a 'chat_mention' for every club member tagged in a chat message.
+
+    Membership is required — tagging must never leak private-club activity to
+    outsiders. reference_id stores the club id so the notification can deep-link.
+    """
+    from sqlalchemy import func as sa_func
+
+    names = extract_mention_usernames(content)
+    if not names:
+        return
+
+    targets = (await db.execute(
+        select(User)
+        .join(ClubMember, ClubMember.user_id == User.id)
+        .where(
+            ClubMember.club_id == club.id,
+            sa_func.lower(User.username).in_(names),
+            User.id != actor.id,
+        )
+    )).scalars().all()
+    if not targets:
+        return
+
+    for u in targets:
+        db.add(Notification(user_id=u.id, actor_id=actor.id, type="chat_mention", reference_id=club.id))
+    await db.commit()
+
+    base = {
+        "type": "chat_mention",
+        "actor_username": actor.username,
+        "actor_display_name": actor.display_name,
+        "actor_avatar_url": actor.avatar_url,
+        "club_name": club.name,
+        "club_slug": club.slug,
+    }
+    for u in targets:
+        # Muted category → still saved above (bell), but pushed without a popup.
+        payload = {**base, "silent": "mentions" in (u.muted_notifications or [])}
+        await redis.publish(f"notif:{u.id}", json.dumps(payload))
 
 
 def _build_chat_payload(msg: ChatMessage, author: User) -> dict:
@@ -126,6 +170,15 @@ async def chat_websocket(websocket: WebSocket, slug: str):
                 except json.JSONDecodeError:
                     continue
 
+                # Ephemeral typing signal — broadcast, never persisted.
+                if data.get("event") == "typing":
+                    await redis.publish(channel, json.dumps({
+                        "event": "typing",
+                        "username": user.username,
+                        "display_name": user.display_name,
+                    }))
+                    continue
+
                 content = (data.get("content") or "").strip()
                 raw_attachments = data.get("attachments") or []
                 attachments = [
@@ -157,6 +210,10 @@ async def chat_websocket(websocket: WebSocket, slug: str):
 
                 payload = json.dumps(_build_chat_payload(chat_msg, user))
                 await redis.publish(channel, payload)
+
+                # @mentions — notify tagged users, but only fellow club members:
+                # chat in a (possibly private) club must never ping outsiders.
+                await _notify_chat_mentions(content, club, user, db)
 
         redis_task = asyncio.create_task(redis_to_ws())
         ws_task = asyncio.create_task(ws_to_redis())

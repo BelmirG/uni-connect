@@ -34,6 +34,16 @@ class CreatePostRequest(BaseModel):
         return self
 
 
+class EditPostRequest(BaseModel):
+    content: str = Field(max_length=10_000)
+
+    @model_validator(mode='after')
+    def validate_edit(self) -> 'EditPostRequest':
+        if not self.content.strip():
+            raise ValueError('Post content cannot be empty.')
+        return self
+
+
 class VoteRequest(BaseModel):
     vote_type: str  # 'up' | 'down'
 
@@ -77,8 +87,10 @@ class PostResponse(BaseModel):
     share_count: int = 0
     poll: Optional[PollResponse] = None
     created_at: datetime
+    edited_at: Optional[datetime] = None
     is_deleted: bool
     is_pinned: bool = False
+    is_bookmarked: bool = False
     parent_post_id: Optional[uuid.UUID]
 
 

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import and_, case, func, literal, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.notify import notify
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.anonymous_post_author import AnonymousPostAuthor
@@ -280,6 +281,29 @@ async def create_answer(
     db.add(AnonymousPostAuthor(post_id=answer.id, user_id=current_user.id))
     await db.commit()
     await db.refresh(answer)
+
+    # Notify the question's author that an answer arrived — WITHOUT touching
+    # anyone's identity. This is the one user-facing code path allowed to read
+    # anonymous_post_authors, and it must uphold two invariants:
+    #   1. The looked-up author id is used only as the notification RECIPIENT.
+    #      It never appears in this response or any payload a client can see.
+    #   2. The notification is actorless (actor=None): the answerer's identity
+    #      is not stored on the row and not pushed over the WebSocket. Even the
+    #      question author only learns "someone answered", never who.
+    # The self-answer check below happens server-side, so its outcome (no
+    # notification) is indistinguishable from the author simply not reacting.
+    question_author_id = (await db.execute(
+        select(AnonymousPostAuthor.user_id).where(AnonymousPostAuthor.post_id == parent.id)
+    )).scalar_one_or_none()
+    if question_author_id and question_author_id != current_user.id:
+        await notify(
+            db,
+            user_id=question_author_id,
+            type="qa_answer",
+            actor=None,
+            reference_id=parent.id,
+            extra={"post_id": str(parent.id)},
+        )
 
     return QAPostResponse(
         id=answer.id,

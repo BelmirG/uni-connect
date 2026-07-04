@@ -392,7 +392,10 @@ export default function ConversationPage() {
   const [mediaOpen, setMediaOpen] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+  const [otherTyping, setOtherTyping] = useState(false);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const typingClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTypingSentRef = useRef(0);
 
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -403,11 +406,12 @@ export default function ConversationPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, otherTyping]);
 
   useEffect(() => {
     let cancelled = false;
     async function init() {
+      let otherUsername: string | null = null;
       try {
         const [conv, me] = await Promise.all([
           apiFetch<ConvResponse>(`/api/messages/${id}`),
@@ -418,6 +422,7 @@ export default function ConversationPage() {
         setOtherUser(conv.other_user);
         setCurrentUsername(me.username);
         setIsMuted(conv.is_muted);
+        otherUsername = conv.other_user.username;
       } catch (err: unknown) {
         if (err instanceof ApiError && err.status === 401) router.replace("/login");
         else if (err instanceof ApiError && err.status === 403) router.replace("/messages");
@@ -428,7 +433,22 @@ export default function ConversationPage() {
       wsRef.current = ws;
       ws.onopen = () => setStatus("connected");
       ws.onmessage = (event) => {
-        const msg: DmMessage = JSON.parse(event.data);
+        const data = JSON.parse(event.data);
+        // Ephemeral typing signal — show the indicator briefly, don't store anything.
+        if (data.event === "typing") {
+          if (data.username === otherUsername) {
+            setOtherTyping(true);
+            if (typingClearRef.current) clearTimeout(typingClearRef.current);
+            typingClearRef.current = setTimeout(() => setOtherTyping(false), 3000);
+          }
+          return;
+        }
+        const msg = data as DmMessage;
+        // A real message replaces the "typing…" bubble instantly.
+        if (msg.sender.username === otherUsername) {
+          setOtherTyping(false);
+          if (typingClearRef.current) clearTimeout(typingClearRef.current);
+        }
         setMessages((prev) => [...prev, msg]);
         setCurrentUsername((cu) => {
           if (cu && msg.sender.username !== cu) {
@@ -515,6 +535,16 @@ export default function ConversationPage() {
 
   function handleSubmit(e: React.FormEvent) { e.preventDefault(); send(); }
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }
+
+  // Tell the other side we're typing — throttled so a burst of keystrokes
+  // produces at most one signal every 2s (their indicator stays lit for 3s).
+  function signalTyping() {
+    const now = Date.now();
+    if (now - lastTypingSentRef.current < 2000) return;
+    if (status !== "connected" || !wsRef.current) return;
+    lastTypingSentRef.current = now;
+    wsRef.current.send(JSON.stringify({ event: "typing" }));
+  }
 
   function handleToggleMute() {
     const newMuted = !isMuted;
@@ -625,6 +655,17 @@ export default function ConversationPage() {
             msgRef={(el) => { if (el) msgRefs.current.set(msg.id, el); else msgRefs.current.delete(msg.id); }}
           />
         ))}
+        {/* Typing indicator — mirrors a received bubble with pulsing dots */}
+        {otherTyping && otherUser && (
+          <div className="flex items-end gap-2 mt-1">
+            <MiniAvatar name={otherUser.display_name} url={otherUser.avatar_url ?? null} size={26} />
+            <div className="bg-surface-container rounded-2xl rounded-bl-md px-4 py-3 flex items-center gap-1">
+              <span className="typing-dot" />
+              <span className="typing-dot" style={{ animationDelay: "0.15s" }} />
+              <span className="typing-dot" style={{ animationDelay: "0.3s" }} />
+            </div>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
@@ -704,7 +745,7 @@ export default function ConversationPage() {
         <textarea
           ref={inputRef}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => { setInput(e.target.value); signalTyping(); }}
           onKeyDown={handleKeyDown}
           placeholder={status === "connected" ? "Type a message…" : "Disconnected"}
           disabled={status !== "connected"}

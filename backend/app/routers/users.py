@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -168,6 +168,97 @@ async def update_profile(
         "username_changed": username_changed,
         "username_changed_at": current_user.username_changed_at.isoformat() if current_user.username_changed_at else None,
     }
+
+
+class NotificationPrefsRequest(BaseModel):
+    # {"mentions": true, "milestones": false, ...} — false = muted (bell only, no popup)
+    prefs: dict[str, bool]
+
+
+@router.get("/me/notification-prefs")
+async def get_notification_prefs(
+    current_user: User = Depends(get_current_user),
+):
+    from app.core.notify import NOTIFICATION_CATEGORIES
+    muted = current_user.muted_notifications or []
+    return {c: c not in muted for c in NOTIFICATION_CATEGORIES}
+
+
+@router.put("/me/notification-prefs")
+async def update_notification_prefs(
+    body: NotificationPrefsRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.core.notify import NOTIFICATION_CATEGORIES
+    unknown = set(body.prefs) - set(NOTIFICATION_CATEGORIES)
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unknown categories: {', '.join(sorted(unknown))}")
+
+    # Merge: only the categories present in the request change.
+    muted = set(current_user.muted_notifications or [])
+    for category, enabled in body.prefs.items():
+        (muted.discard if enabled else muted.add)(category)
+    current_user.muted_notifications = sorted(muted)
+    await db.commit()
+    return {c: c not in muted for c in NOTIFICATION_CATEGORIES}
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str
+
+
+@router.delete("/me")
+async def delete_my_account(
+    body: DeleteAccountRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Self-serve permanent account deletion.
+
+    Guards:
+    - Password re-entry — a stolen session alone can't destroy the account.
+    - Banned accounts can't self-delete: deletion would erase the moderation
+      record (ban reason, identity) and let someone evade a ban and re-register.
+    - Admins and club owners are refused with instructions (same rules as the
+      admin panel's delete: a club's creator can't be null).
+
+    Deletion is hard: votes, follows, memberships, messages, and the
+    anonymous-authorship links cascade away; posts survive but are detached
+    (author_id → NULL), which shows as an ownerless post rather than breaking threads.
+    """
+    from app.core.security import verify_password
+
+    if not current_user.is_active:
+        raise HTTPException(status_code=403, detail="Banned accounts cannot be self-deleted.")
+    if current_user.is_admin:
+        raise HTTPException(status_code=400, detail="Admin accounts cannot be deleted from the app.")
+    if not verify_password(body.password, current_user.password_hash):
+        raise HTTPException(status_code=403, detail="Incorrect password.")
+
+    owned = (await db.execute(
+        select(Club.name).where(Club.created_by == current_user.id)
+    )).scalars().all()
+    if owned:
+        raise HTTPException(
+            status_code=409,
+            detail=f"You still own {', '.join(owned)}. Transfer or delete your club(s) first.",
+        )
+
+    await db.delete(current_user)
+    await db.commit()
+
+    # Kill the session cookie so the client is fully logged out.
+    from app.config import settings
+    response.delete_cookie(
+        key="access_token",
+        httponly=True,
+        samesite="lax",
+        secure=settings.cookie_secure,
+        domain=settings.cookie_domain or None,
+    )
+    return {"ok": True}
 
 
 # ── parameterised routes ───────────────────────────────────────────────────────
@@ -362,6 +453,8 @@ async def follow_user(
             "actor_username": current_user.username,
             "actor_display_name": current_user.display_name,
             "actor_avatar_url": current_user.avatar_url,
+            # Muted category → bell only, no popup on the client.
+            "silent": "follows" in (target.muted_notifications or []),
         }))
 
 
