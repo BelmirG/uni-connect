@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.mentions import extract_mention_usernames
+from app.core.notify import push_live
 from app.core.redis import redis
 from app.core.security import decode_access_token
 from app.database import AsyncSessionLocal, get_db
@@ -59,7 +60,7 @@ async def _notify_chat_mentions(content: str, club: Club, actor: User, db) -> No
     for u in targets:
         # Muted category → still saved above (bell), but pushed without a popup.
         payload = {**base, "silent": "mentions" in (u.muted_notifications or [])}
-        await redis.publish(f"notif:{u.id}", json.dumps(payload))
+        await push_live(db, u.id, payload)
 
 
 def _build_chat_payload(msg: ChatMessage, author: User) -> dict:

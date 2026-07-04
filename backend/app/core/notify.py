@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.redis import redis
+from app.core.webpush import send_web_push
 from app.models.notification import Notification
 from app.models.user import User
 
@@ -42,6 +43,17 @@ def category_of(notification_type: str) -> str | None:
     if notification_type == "qa_answer":
         return "qa_answers"
     return None
+
+
+async def push_live(db: AsyncSession, user_id: uuid.UUID, payload: dict) -> None:
+    """Live delivery of a notification payload: WS toast (Redis) + browser push.
+
+    Every spot that publishes a `notif:{user_id}` payload should go through
+    here so both channels always agree. A `silent` payload still reaches open
+    tabs (they need it to refresh the bell) but is never browser-pushed.
+    """
+    await redis.publish(f"notif:{user_id}", json.dumps(payload))
+    await send_web_push(db, user_id, payload)
 
 
 async def is_muted(db: AsyncSession, user_id: uuid.UUID, notification_type: str) -> bool:
@@ -94,4 +106,4 @@ async def notify(
     # but the live push carries silent=true so the client shows no popup.
     if await is_muted(db, user_id, type):
         payload["silent"] = True
-    await redis.publish(f"notif:{user_id}", json.dumps(payload))
+    await push_live(db, user_id, payload)

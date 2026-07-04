@@ -16,6 +16,7 @@ from app.core.redis import redis
 USERNAME_RE = re.compile(r'^[a-zA-Z0-9_]{3,30}$')
 
 from app.core.constants import FACULTIES
+from app.core.notify import push_live
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.club import Club
@@ -448,14 +449,14 @@ async def follow_user(
         else:
             db.add(Notification(user_id=target.id, actor_id=current_user.id, type="follow"))
         await db.commit()
-        await redis.publish(f"notif:{target.id}", json.dumps({
+        await push_live(db, target.id, {
             "type": "follow",
             "actor_username": current_user.username,
             "actor_display_name": current_user.display_name,
             "actor_avatar_url": current_user.avatar_url,
             # Muted category → bell only, no popup on the client.
             "silent": "follows" in (target.muted_notifications or []),
-        }))
+        })
 
 
 @router.delete("/{username}/follow", status_code=status.HTTP_204_NO_CONTENT)

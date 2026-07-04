@@ -4,13 +4,12 @@ Usernames match the registration charset: letters, digits, underscores, 3–50 c
 We resolve mentions against real accounts server-side so a notification only fires
 for a username that actually exists — a typo like `@nobody` is silently ignored.
 """
-import json
 import re
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.redis import redis
+from app.core.notify import push_live
 from app.models.notification import Notification
 from app.models.user import User
 
@@ -53,4 +52,4 @@ async def notify_post_mentions(content: str, post, actor: User, db: AsyncSession
     for u in users:
         # Muted category → still saved above (bell), but pushed without a popup.
         payload = {**base, "silent": "mentions" in (u.muted_notifications or [])}
-        await redis.publish(f"notif:{u.id}", json.dumps(payload))
+        await push_live(db, u.id, payload)

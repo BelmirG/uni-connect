@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.notify import push_live
 from app.core.redis import redis
 from app.core.security import decode_access_token
 from app.database import AsyncSessionLocal, get_db
@@ -306,7 +307,7 @@ async def share_post(
         conv_muted_by_user2 if conv_user1_id == current_user.id else conv_muted_by_user1
     )
     if not recipient_is_muted:
-        await redis.publish(f"notif:{recipient_id}", json.dumps({
+        await push_live(db, recipient_id, {
             "type": "dm",
             "actor_username": current_user.username,
             "actor_display_name": current_user.display_name,
@@ -316,7 +317,7 @@ async def share_post(
             "has_photo": False,
             "has_file": False,
             "is_post_share": True,
-        }))
+        })
 
     return {"conversation_id": str(conv_id)}
 
@@ -631,7 +632,7 @@ async def dm_websocket(websocket: WebSocket, conversation_id: str):
                     )
                 has_photo = any(a.get("mime_type", "").startswith("image/") for a in attachments)
                 has_file = any(not a.get("mime_type", "").startswith("image/") for a in attachments)
-                await redis.publish(f"notif:{recipient_id}", json.dumps({
+                await push_live(db, recipient_id, {
                     "type": "dm",
                     "actor_username": user.username,
                     "actor_display_name": user.display_name,
@@ -642,7 +643,7 @@ async def dm_websocket(websocket: WebSocket, conversation_id: str):
                     "has_file": has_file,
                     "is_post_share": bool(shared_post_uuid),
                     "silent": recipient_is_muted,
-                }))
+                })
 
         redis_task = asyncio.create_task(redis_to_ws())
         ws_task = asyncio.create_task(ws_to_redis())

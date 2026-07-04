@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     # volume there so uploads survive redeploys.
     data_dir: str = "/app"
 
+    # Web Push (VAPID). The public key is handed to browsers when they subscribe;
+    # the private key signs every push so push services can verify it's us.
+    # The private key is stored base64-encoded PEM so it fits in one env line.
+    # All three empty = browser push is disabled (the app works fine without it).
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_subject: str = ""  # "mailto:you@example.com" — required by push services
+
     # SMTP for real email delivery. Leave smtp_host empty to use the dev stub
     # (prints links to stdout). Works with any provider: Gmail, Brevo, SES, etc.
     smtp_host: str = ""
@@ -66,6 +74,10 @@ class Settings(BaseSettings):
     @property
     def email_configured(self) -> bool:
         return bool(self.smtp_host and self.smtp_user and self.smtp_password)
+
+    @property
+    def push_configured(self) -> bool:
+        return bool(self.vapid_public_key and self.vapid_private_key and self.vapid_subject)
 
     @property
     def is_production(self) -> bool:

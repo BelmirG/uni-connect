@@ -1,13 +1,17 @@
 import asyncio
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from pydantic import BaseModel
+
+from app.config import settings
 from app.core.redis import redis
 from app.core.security import decode_access_token
 from app.database import get_db
@@ -15,6 +19,7 @@ from app.dependencies import get_current_user
 from app.models.club import Club
 from app.models.notification import Notification
 from app.models.post import Post
+from app.models.push_subscription import PushSubscription
 from app.models.user import User
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
@@ -28,6 +33,20 @@ async def get_notifications(
     current_user: User = Depends(get_current_user),
 ):
     from sqlalchemy import func
+
+    # Opportunistic pruning: each time a user opens their notifications, drop
+    # their read entries older than 7 days. This keeps the table from growing
+    # forever without needing a cron job — every active user cleans up after
+    # themselves, and inactive users' rows don't get fetched anyway.
+    await db.execute(
+        delete(Notification).where(
+            Notification.user_id == current_user.id,
+            Notification.is_read == True,
+            Notification.created_at < datetime.now(timezone.utc) - timedelta(days=7),
+        )
+    )
+    await db.commit()
+
     Actor = aliased(User)
     # reference_id can point at a post ("mention", "reply", …) or a club
     # ("chat_mention", "club_*"); resolve both so the UI can deep-link without
@@ -67,6 +86,22 @@ async def get_notifications(
     }
 
 
+@router.get("/unread-count")
+async def unread_count(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from sqlalchemy import func
+
+    count = (await db.execute(
+        select(func.count()).select_from(Notification).where(
+            Notification.user_id == current_user.id,
+            Notification.is_read == False,
+        )
+    )).scalar_one()
+    return {"count": count}
+
+
 @router.post("/mark-read")
 async def mark_all_read(
     db: AsyncSession = Depends(get_db),
@@ -79,6 +114,69 @@ async def mark_all_read(
     )
     await db.commit()
     return {"ok": True}
+
+
+# ── Browser push subscriptions ────────────────────────────────────────────────
+
+class PushKeys(BaseModel):
+    p256dh: str
+    auth: str
+
+
+class PushSubscribeRequest(BaseModel):
+    endpoint: str
+    keys: PushKeys
+
+
+class PushUnsubscribeRequest(BaseModel):
+    endpoint: str
+
+
+@router.get("/push/public-key")
+async def push_public_key():
+    """The VAPID public key browsers need to subscribe. Public by design —
+    it only lets push services verify our pushes, it can't send any."""
+    return {"key": settings.vapid_public_key, "enabled": settings.push_configured}
+
+
+@router.post("/push/subscribe", status_code=204)
+async def push_subscribe(
+    body: PushSubscribeRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Upsert by endpoint: re-subscribing (or another account logging in on the
+    # same browser) replaces the old owner instead of duplicating the row.
+    existing = (await db.execute(
+        select(PushSubscription).where(PushSubscription.endpoint == body.endpoint)
+    )).scalar_one_or_none()
+    if existing:
+        existing.user_id = current_user.id
+        existing.p256dh = body.keys.p256dh
+        existing.auth = body.keys.auth
+    else:
+        db.add(PushSubscription(
+            user_id=current_user.id,
+            endpoint=body.endpoint,
+            p256dh=body.keys.p256dh,
+            auth=body.keys.auth,
+        ))
+    await db.commit()
+
+
+@router.post("/push/unsubscribe", status_code=204)
+async def push_unsubscribe(
+    body: PushUnsubscribeRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await db.execute(
+        delete(PushSubscription).where(
+            PushSubscription.endpoint == body.endpoint,
+            PushSubscription.user_id == current_user.id,
+        )
+    )
+    await db.commit()
 
 
 @router.websocket("/ws")

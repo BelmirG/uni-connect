@@ -6,6 +6,7 @@ import { useRouter, useParams } from "next/navigation";
 import Cropper from "react-easy-crop";
 import type { Area, Point } from "react-easy-crop";
 import { apiFetch, ApiError } from "@/lib/api";
+import { disablePush, enablePush, getPushState, type PushState } from "@/lib/push";
 import { ImageGrid } from "@/components/ImageGrid";
 import MiniAvatar from "@/components/MiniAvatar";
 import { SkeletonProfile } from "@/components/Skeleton";
@@ -200,11 +201,32 @@ export default function ProfilePage() {
   const [notifOpen, setNotifOpen] = useState(false);
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [notifPrefs, setNotifPrefs] = useState<Record<string, boolean> | null>(null);
+  const [pushState, setPushState] = useState<PushState | null>(null);
+  const [pushBusy, setPushBusy] = useState(false);
 
   function loadNotifPrefs() {
     apiFetch<Record<string, boolean>>("/api/users/me/notification-prefs")
       .then(setNotifPrefs)
       .catch(() => {});
+    getPushState().then(setPushState).catch(() => {});
+  }
+
+  async function togglePush() {
+    if (pushBusy) return;
+    setPushBusy(true);
+    try {
+      if (pushState === "on") {
+        await disablePush();
+        setPushState("off");
+      } else {
+        setPushState(await enablePush());
+      }
+    } catch {
+      // Whatever failed, resync the toggle with reality.
+      getPushState().then(setPushState).catch(() => {});
+    } finally {
+      setPushBusy(false);
+    }
   }
 
   function toggleNotifPref(key: string) {
@@ -487,7 +509,11 @@ export default function ProfilePage() {
       setFollowNotifs(notifData.notifications);
       if (notifData.notifications.some((n) => !n.is_read)) {
         apiFetch("/api/notifications/mark-read", { method: "POST" })
-          .then(() => setFollowNotifs((prev) => prev.map((n) => ({ ...n, is_read: true }))))
+          .then(() => {
+            setFollowNotifs((prev) => prev.map((n) => ({ ...n, is_read: true })));
+            // Clear the red dot on the nav bar's Profile tab immediately.
+            window.dispatchEvent(new Event("notifs-read"));
+          })
           .catch(() => {});
       }
     }).catch(() => {});
@@ -572,6 +598,39 @@ export default function ProfilePage() {
                       </div>
                       {prefsOpen ? (
                         <div className="overflow-y-auto flex-1 py-1">
+                          {pushState !== "unsupported" && (
+                            <>
+                              <label className="flex items-center justify-between px-4 py-2.5 text-sm cursor-pointer hover:bg-muted/50 transition-colors">
+                                <span>
+                                  <span className="text-foreground block">Browser notifications</span>
+                                  <span className="text-[11px] text-muted-foreground leading-snug">
+                                    {pushState === "denied"
+                                      ? "Blocked in your browser settings"
+                                      : "Get notified even when the site is closed"}
+                                  </span>
+                                </span>
+                                <button
+                                  role="switch"
+                                  aria-checked={pushState === "on"}
+                                  disabled={pushState === "denied" || pushBusy}
+                                  onClick={togglePush}
+                                  className={cn(
+                                    "w-9 h-5 rounded-full transition-colors relative flex-shrink-0",
+                                    pushState === "on" ? "bg-secondary" : "bg-muted-foreground/30",
+                                    (pushState === "denied" || pushBusy) && "opacity-50"
+                                  )}
+                                >
+                                  <span
+                                    className={cn(
+                                      "absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform",
+                                      pushState === "on" ? "translate-x-4" : "translate-x-0"
+                                    )}
+                                  />
+                                </button>
+                              </label>
+                              <div className="h-px bg-border mx-4 my-1" />
+                            </>
+                          )}
                           {NOTIF_CATEGORIES.map(([key, label]) => (
                             <label key={key} className="flex items-center justify-between px-4 py-2.5 text-sm cursor-pointer hover:bg-muted/50 transition-colors">
                               <span className="text-foreground">{label}</span>

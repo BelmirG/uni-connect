@@ -3,7 +3,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: ius
-      POSTGRES_PASSWORD: ius_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ius_password}
       POSTGRES_DB: iusconnect
     ports:
       - "5432:5432"
@@ -30,10 +30,19 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://ius:ius_password@postgres:5432/iusconnect
+      DATABASE_URL: postgresql+asyncpg://ius:${POSTGRES_PASSWORD:-ius_password}@postgres:5432/iusconnect
       REDIS_URL: redis://redis:6379
-      SECRET_KEY: dev-secret-key-change-before-production
-      ADMIN_KEY: change-this-before-deploying
+      # Secrets come from the gitignored .env file — never hardcode them here.
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      ADMIN_KEY: ${ADMIN_KEY:?set ADMIN_KEY in .env}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-student.ius.edu.ba}
+      # Web Push (optional) — empty means browser push is simply disabled.
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+      RELOAD: "1"   # hot-reload for local dev only; production leaves this unset
     volumes:
       - ./backend:/app
       - ./uploads:/app/uploads
@@ -45,6 +54,9 @@ services:
 
   frontend:
     build: ./frontend
+    # Local dev: hot-reload against the mounted source. The image's default CMD
+    # (npm run start) is the production server used by Railway.
+    command: npm run dev
     ports:
       - "3000:3000"
     environment:

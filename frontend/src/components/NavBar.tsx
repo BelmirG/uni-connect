@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { isImmersiveRoute } from "@/lib/immersive";
+import { useToast } from "@/components/ToastProvider";
 
 const HIDDEN_ON = ["/", "/login", "/register", "/verify-email", "/forgot-password", "/reset-password", "/admin"];
 
@@ -77,8 +78,10 @@ const PILL_W = 62; // px — pill is narrower than the full item slot
 
 export default function NavBar() {
   const pathname = usePathname();
+  const { onNotification } = useToast();
   const [profileHref, setProfileHref] = useState("/profile");
   const [unreadMessages, setUnreadMessages] = useState(0);
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
 
   // Remember the deepest route visited within each section, so tapping a nav tab
   // returns you to where you were (e.g. back into a club chat or a Q&A thread)
@@ -107,11 +110,37 @@ export default function NavBar() {
       apiFetch<{ count: number }>("/api/messages/unread-count")
         .then((d) => setUnreadMessages(d.count))
         .catch(() => {});
+      apiFetch<{ count: number }>("/api/notifications/unread-count")
+        .then((d) => setUnreadNotifs(d.count))
+        .catch(() => {});
     }
     fetchUnread();
     const interval = setInterval(fetchUnread, 30_000);
     return () => clearInterval(interval);
   }, [pathname]);
+
+  // Instant badge updates: bump on incoming WS notifications instead of waiting
+  // for the next poll, and clear when the bell dropdown marks everything read
+  // (the profile page dispatches "notifs-read" after a successful mark-read).
+  useEffect(() => {
+    const unsubscribe = onNotification((p) => {
+      if (p.type === "dm") {
+        apiFetch<{ count: number }>("/api/messages/unread-count")
+          .then((d) => setUnreadMessages(d.count))
+          .catch(() => {});
+      } else {
+        apiFetch<{ count: number }>("/api/notifications/unread-count")
+          .then((d) => setUnreadNotifs(d.count))
+          .catch(() => {});
+      }
+    });
+    const onRead = () => setUnreadNotifs(0);
+    window.addEventListener("notifs-read", onRead);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("notifs-read", onRead);
+    };
+  }, [onNotification]);
 
   if (HIDDEN_ON.includes(pathname) || isImmersiveRoute(pathname)) return null;
 
@@ -176,7 +205,9 @@ export default function NavBar() {
               : active
                 ? item.href
                 : lastRoutes[item.href] ?? item.href;
-          const showDot = item.href === "/messages" && unreadMessages > 0;
+          const showDot =
+            (item.href === "/messages" && unreadMessages > 0) ||
+            (item.href === "/profile" && unreadNotifs > 0);
 
           return (
             <Link
