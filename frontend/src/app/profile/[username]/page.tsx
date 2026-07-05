@@ -53,6 +53,7 @@ interface UserClub {
   name: string;
   slug: string;
   description: string | null;
+  banner_url: string | null;
   is_private: boolean;
   role: string;
 }
@@ -1015,8 +1016,12 @@ export default function ProfilePage() {
                   href={`/clubs/${club.slug}`}
                   className="flex items-center gap-3 p-3 bg-surface border border-outline-variant rounded-xl hover:bg-surface-container-low transition-colors no-underline"
                 >
-                  <div className="w-11 h-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold text-base flex-shrink-0 uppercase">
-                    {club.name.charAt(0)}
+                  <div className="w-11 h-11 rounded-xl overflow-hidden bg-primary/10 text-primary flex items-center justify-center font-bold text-base flex-shrink-0 uppercase">
+                    {club.banner_url ? (
+                      <img src={club.banner_url} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      club.name.charAt(0)
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">

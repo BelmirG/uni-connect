@@ -16,12 +16,17 @@ class ClubResponse(BaseModel):
     name: str
     slug: str
     description: Optional[str]
+    banner_url: Optional[str]
     is_private: bool
     member_count: int
     is_member: bool
     role: Optional[str]           # 'member' | 'moderator' | 'owner' | None
     has_pending_request: bool     # current user has a pending join request
     created_at: datetime
+
+
+class UpdateClubBannerRequest(BaseModel):
+    banner_url: Optional[str] = Field(default=None, max_length=500)
 
 
 class ClubListResponse(BaseModel):

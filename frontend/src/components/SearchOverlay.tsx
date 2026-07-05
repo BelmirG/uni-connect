@@ -37,6 +37,7 @@ interface SearchClub {
   name: string;
   slug: string;
   description: string | null;
+  banner_url: string | null;
   is_private: boolean;
   member_count: number;
   is_member: boolean;
@@ -213,8 +214,12 @@ export function SearchOverlay({ open, onClose, mode, postType = "feed" }: Props)
                 onClick={onClose}
                 className="flex items-center gap-3 bg-surface rounded-2xl shadow-sm px-4 py-3 no-underline hover:bg-surface-container-lowest transition-colors"
               >
-                <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold flex-shrink-0 uppercase">
-                  {c.name.charAt(0)}
+                <div className="w-10 h-10 rounded-xl overflow-hidden bg-primary/10 text-primary flex items-center justify-center font-bold flex-shrink-0 uppercase">
+                  {c.banner_url ? (
+                    <img src={c.banner_url} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    c.name.charAt(0)
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 text-sm font-semibold text-on-surface truncate">

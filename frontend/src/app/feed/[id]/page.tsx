@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import {
@@ -141,7 +142,7 @@ function SharePanel({ postId, shareCount }: { postId: string; shareCount: number
         {shareCount > 0 && <span>{shareCount}</span>}
       </button>
 
-      {open && (
+      {open && typeof document !== "undefined" && createPortal(
         <>
           <div onClick={close} className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200]" />
           <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(360px,90vw)] bg-white rounded-2xl shadow-2xl z-[201] p-5">
@@ -169,7 +170,8 @@ function SharePanel({ postId, shareCount }: { postId: string; shareCount: number
               </div>
             </form>
           </div>
-        </>
+        </>,
+        document.body
       )}
     </>
   );
@@ -579,9 +581,13 @@ export default function PostDetailPage() {
   return (
     <Ctx.Provider value={ctxValue}>
       <main className="max-w-xl mx-auto px-4 pt-4 pb-24">
-        {/* Back link — returns to where you came from (profile) or the feed list. */}
+        {/* Back link — returns to where you came from (profile) or the feed list.
+            scroll={false}: the feed restores its own scroll position on return
+            (see lib/feedCache.ts) — Next's default scroll-to-top would win the race
+            and undo that restoration. */}
         <Link
           href={backHref}
+          scroll={false}
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4 no-underline"
         >
           <ArrowLeft className="w-4 h-4" />

@@ -16,6 +16,7 @@ interface Club {
   name: string;
   slug: string;
   description: string | null;
+  banner_url: string | null;
   is_private: boolean;
   member_count: number;
   is_member: boolean;
@@ -227,39 +228,52 @@ export default function ClubsPage() {
             <div key={club.id} className="bg-surface rounded-2xl shadow-sm overflow-hidden">
               <Link href={`/clubs/${club.slug}`} className="block px-4 pt-4 pb-3 no-underline">
                 <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                      <span className="font-semibold text-sm text-on-surface">{club.name}</span>
-                      {club.is_private && (
-                        <span className="flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                          <Lock className="w-2.5 h-2.5" />
-                          Private
-                        </span>
-                      )}
-                      {club.role && (
-                        <span
-                          className={cn(
-                            "text-[10px] font-semibold px-1.5 py-0.5 rounded",
-                            club.role === "owner"
-                              ? "bg-purple-100 text-purple-700"
-                              : club.role === "moderator"
-                              ? "bg-green-100 text-green-700"
-                              : "bg-muted text-muted-foreground"
-                          )}
-                        >
-                          {club.role}
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    {/* Banner thumbnail — same crop shown full-width on the club page,
+                        just cropped to a square here so the row height never changes. */}
+                    <div className="w-12 h-12 rounded-2xl overflow-hidden flex-shrink-0 bg-gradient-to-br from-secondary/25 to-secondary/5 flex items-center justify-center">
+                      {club.banner_url ? (
+                        <img src={club.banner_url} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-sm font-bold text-secondary uppercase">
+                          {club.name.charAt(0)}
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-1 text-xs text-on-surface-variant">
-                      <Users className="w-3 h-3" />
-                      {club.member_count} {club.member_count === 1 ? "member" : "members"}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                        <span className="font-semibold text-sm text-on-surface">{club.name}</span>
+                        {club.is_private && (
+                          <span className="flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                            <Lock className="w-2.5 h-2.5" />
+                            Private
+                          </span>
+                        )}
+                        {club.role && (
+                          <span
+                            className={cn(
+                              "text-[10px] font-semibold px-1.5 py-0.5 rounded",
+                              club.role === "owner"
+                                ? "bg-purple-100 text-purple-700"
+                                : club.role === "moderator"
+                                ? "bg-green-100 text-green-700"
+                                : "bg-muted text-muted-foreground"
+                            )}
+                          >
+                            {club.role}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 text-xs text-on-surface-variant">
+                        <Users className="w-3 h-3" />
+                        {club.member_count} {club.member_count === 1 ? "member" : "members"}
+                      </div>
+                      {club.description && (
+                        <p className="text-xs text-on-surface-variant mt-1.5 line-clamp-2">
+                          {club.description}
+                        </p>
+                      )}
                     </div>
-                    {club.description && (
-                      <p className="text-xs text-on-surface-variant mt-1.5 line-clamp-2">
-                        {club.description}
-                      </p>
-                    )}
                   </div>
                   <ChevronRight className="w-4 h-4 text-muted-foreground/40 flex-shrink-0 mt-0.5" />
                 </div>

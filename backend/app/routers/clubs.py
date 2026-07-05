@@ -20,7 +20,7 @@ from app.models.club_member import ClubMember
 from app.models.post import Post
 from app.models.user import User
 from app.models.vote import Vote
-from app.schemas.club import ClubListResponse, ClubResponse, CreateClubRequest
+from app.schemas.club import ClubListResponse, ClubResponse, CreateClubRequest, UpdateClubBannerRequest
 from app.schemas.post import (
     AuthorInfo,
     CreatePostRequest,
@@ -178,6 +178,7 @@ def _row_to_club(row) -> ClubResponse:
         name=club.name,
         slug=club.slug,
         description=club.description,
+        banner_url=club.banner_url,
         is_private=club.is_private,
         member_count=member_count or 0,
         is_member=user_role is not None,
@@ -251,6 +252,7 @@ async def create_club(
         name=club.name,
         slug=club.slug,
         description=club.description,
+        banner_url=None,
         is_private=club.is_private,
         member_count=1,
         is_member=True,
@@ -354,6 +356,25 @@ async def join_club(
                 reference_id=club.id,
                 extra={"club_name": club.name, "club_slug": club.slug},
             )
+
+    row = (await db.execute(_build_club_select(current_user.id, Club.slug == slug))).first()
+    return _row_to_club(row)
+
+
+@router.put("/{slug}/banner", response_model=ClubResponse)
+async def update_club_banner(
+    slug: str,
+    body: UpdateClubBannerRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    club = await _get_club_or_404(slug, db)
+    membership = await _get_membership(club.id, current_user.id, db)
+    if not membership or membership.role not in ("owner", "moderator"):
+        raise HTTPException(status_code=403, detail="Only the owner or a moderator can change the banner.")
+
+    club.banner_url = body.banner_url or None
+    await db.commit()
 
     row = (await db.execute(_build_club_select(current_user.id, Club.slug == slug))).first()
     return _row_to_club(row)

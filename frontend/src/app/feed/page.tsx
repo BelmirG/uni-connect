@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -33,6 +34,7 @@ import { FACULTIES, FACULTY_NAMES, Faculty } from "@/lib/faculties";
 import { timeAgo } from "@/lib/timeAgo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { getFeedCache, saveFeedCache } from "@/lib/feedCache";
 
 type FeedTab = "discover" | "friends";
 
@@ -83,17 +85,25 @@ interface VoteResponse {
 
 export default function FeedPage() {
   const router = useRouter();
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  // Returning from a post's comments restores the exact feed state (posts already
+  // loaded, filters, scroll position) instead of re-fetching from the top — see
+  // the mount effect below and lib/feedCache.ts.
+  const [cachedOnMount] = useState(() => getFeedCache<Post>());
+  const [posts, setPosts] = useState<Post[]>(() => cachedOnMount?.posts ?? []);
+  const [total, setTotal] = useState(() => cachedOnMount?.total ?? 0);
+  const [loading, setLoading] = useState(() => !cachedOnMount);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [feedTab, setFeedTab] = useState<FeedTab>("discover");
+  const [feedTab, setFeedTab] = useState<FeedTab>(() => (cachedOnMount?.feedTab as FeedTab) ?? "discover");
   const [feedRefreshKey] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [sort, setSort] = useState<"hot" | "new">("hot");
-  const [facultyFilter, setFacultyFilter] = useState<Faculty | null>(null);
+  const [sort, setSort] = useState<"hot" | "new">(() => (cachedOnMount?.sort as "hot" | "new") ?? "hot");
+  const [facultyFilter, setFacultyFilter] = useState<Faculty | null>(() => (cachedOnMount?.facultyFilter as Faculty | null) ?? null);
   const [currentUsername, setCurrentUsername] = useState<string | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  // Guards the initial-load effect so a restored cache isn't immediately
+  // overwritten by a fresh fetch on first mount.
+  const skipNextLoadRef = useRef(!!cachedOnMount);
+  const restoredScrollRef = useRef(false);
   const [content, setContent] = useState("");
   const [caret, setCaret] = useState<number | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -119,6 +129,15 @@ export default function FeedPage() {
 
   // Initial load / filter change — reset everything
   useEffect(() => {
+    // First run after restoring from cache: posts/total are already correct,
+    // just need the current user (not cached) — skip the full re-fetch.
+    if (skipNextLoadRef.current) {
+      skipNextLoadRef.current = false;
+      apiFetch<{ username: string }>("/api/auth/me")
+        .then((me) => setCurrentUsername(me.username))
+        .catch(() => router.replace("/login"));
+      return;
+    }
     setLoading(true);
     Promise.all([
       apiFetch<PostListResponse>(`/api/posts?${buildParams(0)}`),
@@ -132,6 +151,52 @@ export default function FeedPage() {
       .catch(() => router.replace("/login"))
       .finally(() => setLoading(false));
   }, [feedTab, sort, facultyFilter, feedRefreshKey, router]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Restore scroll position after a cache-backed mount. Runs once; a second,
+  // delayed pass corrects for late-loading images/avatars shifting page height.
+  useEffect(() => {
+    if (!cachedOnMount || restoredScrollRef.current) return;
+    restoredScrollRef.current = true;
+    const y = cachedOnMount.scrollY;
+    window.scrollTo(0, y);
+    const t = setTimeout(() => window.scrollTo(0, y), 120);
+    return () => clearTimeout(t);
+  }, [cachedOnMount]);
+
+  // Keep a live snapshot so the unmount handler below can save the exact
+  // state the user leaves with (navigating into a post's comments, a
+  // profile, etc.) rather than a stale closure from an earlier render.
+  const liveStateRef = useRef({ posts, total, feedTab, sort, facultyFilter });
+  useEffect(() => {
+    liveStateRef.current = { posts, total, feedTab, sort, facultyFilter };
+  });
+
+  // Snapshot scroll position on every click, in the capture phase — before
+  // Next.js's own navigation handling resets window.scrollY for the incoming
+  // route. That reset happens while this page is still mounted and fires a
+  // genuine 'scroll' event, so a passive scroll listener alone would just
+  // observe the reset itself. Capturing at click time, ahead of any link's
+  // own handler, reliably records the real position the user was at.
+  const lastScrollYRef = useRef(0);
+  useEffect(() => {
+    function onClickCapture() { lastScrollYRef.current = window.scrollY; }
+    window.addEventListener("click", onClickCapture, true);
+    return () => window.removeEventListener("click", onClickCapture, true);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      const s = liveStateRef.current;
+      saveFeedCache({
+        feedTab: s.feedTab,
+        sort: s.sort,
+        facultyFilter: s.facultyFilter,
+        posts: s.posts,
+        total: s.total,
+        scrollY: lastScrollYRef.current,
+      });
+    };
+  }, []);
 
   // Infinite scroll — watch the sentinel div
   useEffect(() => {
@@ -461,7 +526,7 @@ function SharePanel({ postId, shareCount }: { postId: string; shareCount: number
         {shareCount > 0 && <span>{shareCount}</span>}
       </button>
 
-      {open && (
+      {open && typeof document !== "undefined" && createPortal(
         <>
           <div onClick={close} className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200]" />
           <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(360px,90vw)] bg-white rounded-2xl shadow-2xl z-[201] p-5">
@@ -501,7 +566,8 @@ function SharePanel({ postId, shareCount }: { postId: string; shareCount: number
               </div>
             </form>
           </div>
-        </>
+        </>,
+        document.body
       )}
     </>
   );

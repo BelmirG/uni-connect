@@ -358,6 +358,7 @@ async def get_user_clubs(
             "name": club.name,
             "slug": club.slug,
             "description": club.description,
+            "banner_url": club.banner_url,
             "is_private": club.is_private,
             "role": role,
         }

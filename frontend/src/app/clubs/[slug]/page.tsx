@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
+  Camera,
   ChevronUp,
   ChevronDown,
   MessageCircle,
@@ -37,6 +38,7 @@ interface Club {
   name: string;
   slug: string;
   description: string | null;
+  banner_url: string | null;
   is_private: boolean;
   member_count: number;
   is_member: boolean;
@@ -104,6 +106,9 @@ export default function ClubDetailPage() {
   const { slug } = useParams<{ slug: string }>();
 
   const [club, setClub] = useState<Club | null>(null);
+  const [bannerUploading, setBannerUploading] = useState(false);
+  const [bannerError, setBannerError] = useState<string | null>(null);
+  const bannerInputRef = useRef<HTMLInputElement>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [total, setTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -238,6 +243,34 @@ export default function ClubDetailPage() {
       setClub((prev) => prev ? { ...prev, has_pending_request: false } : prev);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : "Could not cancel request.");
+    }
+  }
+
+  async function handleBannerChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (bannerInputRef.current) bannerInputRef.current.value = "";
+    if (!file) return;
+
+    setBannerUploading(true);
+    setBannerError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", credentials: "include", body: fd });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { detail?: string };
+        throw new Error(body.detail ?? "Upload failed.");
+      }
+      const { url } = (await res.json()) as { url: string };
+      const updated = await apiFetch<Club>(`/api/clubs/${slug}/banner`, {
+        method: "PUT",
+        body: JSON.stringify({ banner_url: url }),
+      });
+      setClub(updated);
+    } catch (err: unknown) {
+      setBannerError(err instanceof Error ? err.message : "Could not update banner.");
+    } finally {
+      setBannerUploading(false);
     }
   }
 
@@ -433,6 +466,42 @@ export default function ClubDetailPage() {
 
         {/* Club header card */}
         <div className="bg-surface rounded-2xl shadow-sm mb-4">
+          {/* Banner — clipped to its own rounded top corners, not the whole card,
+              so the ⋮ menu below (which overflows this card's bounds) isn't cut off. */}
+          <div className="relative h-32 sm:h-40 rounded-t-2xl overflow-hidden bg-gradient-to-br from-secondary/20 to-secondary/5">
+            {club.banner_url && (
+              <img
+                src={club.banner_url}
+                alt=""
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+            )}
+            {/* Fades the image into the card's background so the header text below
+                never fights the banner for a hard edge. */}
+            <div className="absolute inset-0 bg-gradient-to-t from-surface via-transparent to-transparent" />
+            {isMod && (
+              <>
+                <input
+                  ref={bannerInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/gif,image/webp"
+                  className="hidden"
+                  onChange={handleBannerChange}
+                />
+                <button
+                  type="button"
+                  onClick={() => bannerInputRef.current?.click()}
+                  disabled={bannerUploading}
+                  className="absolute top-2 right-2 flex items-center gap-1 text-[11px] font-medium px-2.5 py-1.5 rounded-full bg-black/40 text-white backdrop-blur-sm hover:bg-black/55 transition-colors disabled:opacity-60"
+                >
+                  <Camera className="w-3 h-3" />
+                  {bannerUploading ? "Uploading…" : club.banner_url ? "Change banner" : "Add banner"}
+                </button>
+              </>
+            )}
+          </div>
+          {bannerError && <p className="px-4 pt-2 text-xs text-destructive">{bannerError}</p>}
+
           <div className="px-4 pt-4 pb-3">
             <div className="flex items-start justify-between gap-3">
               <div className="flex-1 min-w-0">
