@@ -2,7 +2,7 @@ import secrets
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Security
+from fastapi import APIRouter, Depends, HTTPException, Request, Security
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.config import settings
+from app.core.rate_limit import rate_limit
 from app.database import get_db
 from app.models.club import Club
 from app.models.post import Post
@@ -22,10 +23,13 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 _api_key_header = APIKeyHeader(name="x-admin-key", auto_error=False)
 
 
-def _verify_admin_key(key: str = Security(_api_key_header)):
+async def _verify_admin_key(request: Request, key: str = Security(_api_key_header)):
     # Constant-time compare so an attacker can't recover the key byte-by-byte
     # from response timing.
     if not key or not secrets.compare_digest(key, settings.admin_key):
+        # Only failures count toward the limit, so the real admin is never
+        # throttled — but an outsider guessing keys gets cut off fast.
+        await rate_limit(request, key="admin_key_fail", limit=10, window_seconds=3600)
         raise HTTPException(status_code=403, detail="Invalid admin key.")
 
 

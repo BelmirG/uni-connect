@@ -2,8 +2,9 @@ import re
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
+from app.core.rate_limit import rate_limit
 from app.dependencies import get_current_user
 from app.models.user import User
 
@@ -109,9 +110,13 @@ def _sanitize_filename(raw: str, expected_ext: str) -> str:
 
 @router.post("")
 async def upload_image(
+    request: Request,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):
+    # Uploads write multi-MB files to disk — generous for real use, but stops
+    # a single client from filling the volume.
+    await rate_limit(request, key="upload", limit=60, window_seconds=3600)
     if file.content_type not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(
             status_code=422,
@@ -138,9 +143,11 @@ async def upload_image(
 
 @router.post("/file")
 async def upload_file(
+    request: Request,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):
+    await rate_limit(request, key="upload_file", limit=30, window_seconds=3600)
     ext = Path(file.filename or "").suffix.lower()
 
     # ── path 1: document (PDF / Open XML) — validated by MIME + magic bytes ──

@@ -1,7 +1,7 @@
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,7 +28,12 @@ def _enforce_university_email(email: str) -> None:
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-async def register(body: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
+async def register(
+    body: RegisterRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
     await rate_limit(request, key="register", limit=5, window_seconds=3600)
     _enforce_university_email(body.email)
 
@@ -59,7 +64,9 @@ async def register(body: RegisterRequest, request: Request, db: AsyncSession = D
     db.add(user)
     await db.commit()
 
-    send_verification_email(body.email, token)
+    # Sent after the response, in a worker thread — SMTP takes seconds and is
+    # blocking, so it must never run inline on the event loop.
+    background_tasks.add_task(send_verification_email, body.email, token)
 
     return {"message": "Account created. Check your email to verify before logging in."}
 
@@ -151,7 +158,12 @@ async def me(current_user: User = Depends(get_current_user)):
 
 
 @router.post("/forgot-password")
-async def forgot_password(body: ForgotPasswordRequest, request: Request, db: AsyncSession = Depends(get_db)):
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
     await rate_limit(request, key="forgot", limit=5, window_seconds=3600)
     user = (await db.execute(
         select(User).where(User.email == body.email.lower())
@@ -163,7 +175,7 @@ async def forgot_password(body: ForgotPasswordRequest, request: Request, db: Asy
         user.password_reset_token = token
         user.password_reset_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
         await db.commit()
-        send_reset_email(body.email, token)
+        background_tasks.add_task(send_reset_email, body.email, token)
 
     return {"message": "If that email is registered you will receive a reset link shortly."}
 
