@@ -536,7 +536,9 @@ export default function ConversationPage() {
   }
 
   function handleSubmit(e: React.FormEvent) { e.preventDefault(); send(); }
-  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }
+  // Enter inserts a newline (like every mobile messenger); sending is the
+  // send button's job. No onKeyDown handler needed for that — it's the
+  // textarea's default behavior.
 
   // Tell the other side we're typing — throttled so a burst of keystrokes
   // produces at most one signal every 2s (their indicator stays lit for 3s).
@@ -748,7 +750,6 @@ export default function ConversationPage() {
           ref={inputRef}
           value={input}
           onChange={(e) => { setInput(e.target.value); signalTyping(); }}
-          onKeyDown={handleKeyDown}
           placeholder={status === "connected" ? "Type a message…" : "Disconnected"}
           disabled={status !== "connected"}
           maxLength={2000}

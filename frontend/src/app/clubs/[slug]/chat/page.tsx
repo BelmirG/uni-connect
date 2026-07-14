@@ -500,7 +500,9 @@ export default function ClubChatPage() {
   }
 
   function handleSubmit(e: React.FormEvent) { e.preventDefault(); send(); }
-  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }
+  // Enter inserts a newline (like every mobile messenger); sending is the
+  // send button's job. No onKeyDown handler needed for that — it's the
+  // textarea's default behavior.
 
   // Tell the room we're typing — throttled to one signal every 2s.
   function signalTyping() {
@@ -706,7 +708,6 @@ export default function ClubChatPage() {
             onChange={(e) => { setInput(e.target.value); setCaret(e.target.selectionStart); signalTyping(); }}
             onKeyUp={(e) => setCaret(e.currentTarget.selectionStart)}
             onClick={(e) => setCaret(e.currentTarget.selectionStart)}
-            onKeyDown={handleKeyDown}
             placeholder={status === "connected" ? "Type a message…" : "Disconnected"}
             disabled={status !== "connected"}
             maxLength={2000}

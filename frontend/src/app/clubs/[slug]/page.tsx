@@ -671,7 +671,6 @@ export default function ClubDetailPage() {
               <textarea
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); (e.currentTarget.closest("form") as HTMLFormElement)?.requestSubmit(); } }}
                 placeholder={`Post in ${club.name}…`}
                 rows={4}
                 className="w-full resize-none text-sm bg-transparent focus:outline-none text-on-surface placeholder:text-on-surface-variant/60"
