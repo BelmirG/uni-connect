@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 };
 
 const EFFECTIVE_DATE = "July 5, 2026";
-const CONTACT_EMAIL = "grahicbelmir@gmail.com";
+const CONTACT_EMAIL = "contact@unithread.app";
 
 export default function TermsPage() {
   return (
