@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, GraduationCap } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import { clearAllPageCaches } from "@/lib/pageCaches";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,6 +39,8 @@ export default function LoginPage() {
         method: "POST",
         body: JSON.stringify(form),
       });
+      // A previous session on this device may have left page snapshots behind.
+      clearAllPageCaches();
       router.push("/feed");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Login failed.");

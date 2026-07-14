@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { clearFeedCache } from "@/lib/feedCache";
+import { applyVote } from "@/lib/vote";
 import UserSearchInput from "@/components/UserSearchInput";
 import { AttachBar } from "@/components/AttachBar";
 import { ImageGrid } from "@/components/ImageGrid";
@@ -446,6 +447,12 @@ export default function PostDetailPage() {
   }, [id, router]);
 
   async function handleVote(targetId: string, voteType: "up" | "down") {
+    const before =
+      (post?.id === targetId ? post : undefined) ?? allReplies.find((p) => p.id === targetId);
+    if (!before) return;
+    // Instant local update; the server response (or a rollback) reconciles it.
+    setPost((prev) => (prev?.id === targetId ? applyVote(prev, voteType) : prev));
+    setAllReplies((prev) => prev.map((p) => (p.id === targetId ? applyVote(p, voteType) : p)));
     try {
       const data = await apiFetch<VoteResponse>(`/api/posts/${targetId}/vote`, {
         method: "POST",
@@ -453,7 +460,11 @@ export default function PostDetailPage() {
       });
       setPost((prev) => (prev?.id === targetId ? { ...prev, ...data } : prev));
       setAllReplies((prev) => prev.map((p) => (p.id === targetId ? { ...p, ...data } : p)));
-    } catch { /* non-critical */ }
+    } catch {
+      const revert = { upvotes: before.upvotes, downvotes: before.downvotes, current_user_vote: before.current_user_vote };
+      setPost((prev) => (prev?.id === targetId ? { ...prev, ...revert } : prev));
+      setAllReplies((prev) => prev.map((p) => (p.id === targetId ? { ...p, ...revert } : p)));
+    }
   }
 
   async function handleDelete(targetId: string) {

@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { clearQACache } from "@/lib/qaCache";
+import { applyVote } from "@/lib/vote";
 import { AttachBar } from "@/components/AttachBar";
 import BookmarkButton from "@/components/BookmarkButton";
 import { ImageGrid } from "@/components/ImageGrid";
@@ -340,6 +341,12 @@ export default function QADetailPage() {
   }, [id, router]);
 
   async function handleVote(targetId: string, voteType: "up" | "down") {
+    const before =
+      (question?.id === targetId ? question : undefined) ?? allAnswers.find((p) => p.id === targetId);
+    if (!before) return;
+    // Instant local update; the server response (or a rollback) reconciles it.
+    setQuestion((prev) => (prev?.id === targetId ? applyVote(prev, voteType) : prev));
+    setAllAnswers((prev) => prev.map((p) => (p.id === targetId ? applyVote(p, voteType) : p)));
     try {
       const data = await apiFetch<VoteResponse>(`/api/qa/${targetId}/vote`, {
         method: "POST",
@@ -347,7 +354,11 @@ export default function QADetailPage() {
       });
       setQuestion((prev) => (prev?.id === targetId ? { ...prev, ...data } : prev));
       setAllAnswers((prev) => prev.map((p) => (p.id === targetId ? { ...p, ...data } : p)));
-    } catch { /* non-critical */ }
+    } catch {
+      const revert = { upvotes: before.upvotes, downvotes: before.downvotes, current_user_vote: before.current_user_vote };
+      setQuestion((prev) => (prev?.id === targetId ? { ...prev, ...revert } : prev));
+      setAllAnswers((prev) => prev.map((p) => (p.id === targetId ? { ...p, ...revert } : p)));
+    }
   }
 
   async function handleDelete(targetId: string) {

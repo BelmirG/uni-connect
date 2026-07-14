@@ -16,6 +16,7 @@ import {
   Search as SearchIcon,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import { applyVote } from "@/lib/vote";
 import BookmarkButton from "@/components/BookmarkButton";
 import { InlineComposer } from "@/components/InlineComposer";
 import { SearchOverlay } from "@/components/SearchOverlay";
@@ -277,19 +278,20 @@ export default function QAPage() {
   }
 
   async function handleVote(postId: string, voteType: "up" | "down") {
+    const before = posts.find((p) => p.id === postId);
+    if (!before) return;
+    // Instant local update; the server response (or a rollback) reconciles it.
+    setPosts((prev) => prev.map((p) => (p.id === postId ? applyVote(p, voteType) : p)));
     try {
       const data = await apiFetch<VoteResponse>(`/api/qa/${postId}/vote`, {
         method: "POST",
         body: JSON.stringify({ vote_type: voteType }),
       });
-      setPosts((prev) =>
-        prev.map((p) =>
-          p.id === postId
-            ? { ...p, upvotes: data.upvotes, downvotes: data.downvotes, current_user_vote: data.current_user_vote }
-            : p
-        )
-      );
-    } catch { /* non-critical */ }
+      setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, ...data } : p)));
+    } catch {
+      const revert = { upvotes: before.upvotes, downvotes: before.downvotes, current_user_vote: before.current_user_vote };
+      setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, ...revert } : p)));
+    }
   }
 
   const pillCls = (active: boolean) =>

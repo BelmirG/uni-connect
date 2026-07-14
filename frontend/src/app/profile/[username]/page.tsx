@@ -7,6 +7,8 @@ import Cropper from "react-easy-crop";
 import type { Area, Point } from "react-easy-crop";
 import { apiFetch, ApiError } from "@/lib/api";
 import { disablePush, enablePush, getPushState, type PushState } from "@/lib/push";
+import { getProfileCache, saveProfileCache, clearProfileCache } from "@/lib/profileCache";
+import { clearAllPageCaches } from "@/lib/pageCaches";
 import { ImageGrid } from "@/components/ImageGrid";
 import MiniAvatar from "@/components/MiniAvatar";
 import { SkeletonProfile } from "@/components/Skeleton";
@@ -252,13 +254,24 @@ export default function ProfilePage() {
   const [tab, setTab] = useState<"posts" | "clubs">("posts");
 
   useEffect(() => {
-    setLoading(true);
+    // Render a cached snapshot instantly (no skeleton) when we have one; the
+    // fetch below still runs and silently brings the page up to date.
+    const cached = getProfileCache<Profile, Post, UserClub>(username);
+    if (cached) {
+      setProfile(cached.profile);
+      setPosts(cached.posts);
+      setClubs(cached.clubs);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     Promise.all([
       apiFetch<Profile>(`/api/users/${username}`),
       apiFetch<Post[]>(`/api/users/${username}/posts`),
       apiFetch<UserClub[]>(`/api/users/${username}/clubs`),
     ])
       .then(([p, userPosts, userClubs]) => {
+        saveProfileCache(username, { profile: p, posts: userPosts, clubs: userClubs });
         setProfile(p);
         setPosts(userPosts);
         setClubs(userClubs);
@@ -370,6 +383,7 @@ export default function ProfilePage() {
         }),
       });
       setProfile((prev) => prev ? { ...prev, avatar_url: updated.avatar_url ?? null } : prev);
+      clearProfileCache(username);
       setCropSrc(null);
     } catch (err: unknown) {
       setCropError(err instanceof Error ? err.message : "Failed to save photo.");
@@ -408,6 +422,10 @@ export default function ProfilePage() {
         username_changed_at: updated.username_changed_at,
       } : prev);
       setEditing(false);
+      // Snapshots of this profile (and, after a rename, the old username's)
+      // are stale now — drop them so the next visit refetches.
+      clearProfileCache(username);
+      clearProfileCache(updated.username);
       if (updated.username_changed) router.replace(`/profile/${updated.username}`);
     } catch (err: unknown) {
       setSaveError(err instanceof Error ? err.message : "Failed to save.");
@@ -418,6 +436,8 @@ export default function ProfilePage() {
 
   async function handleLogout() {
     await apiFetch("/api/auth/logout", { method: "POST" });
+    // In-memory page snapshots must not leak into whoever signs in next.
+    clearAllPageCaches();
     router.replace("/login");
   }
 
@@ -451,15 +471,25 @@ export default function ProfilePage() {
   async function handleFollow() {
     if (!profile || followLoading) return;
     setFollowLoading(true);
+    const wasFollowing = profile.is_following;
+    // Optimistic flip — the button should respond to the tap, not the network.
+    setProfile((prev) => prev ? {
+      ...prev,
+      is_following: !wasFollowing,
+      follower_count: prev.follower_count + (wasFollowing ? -1 : 1),
+    } : prev);
     try {
-      if (profile.is_following) {
-        await apiFetch(`/api/users/${profile.username}/follow`, { method: "DELETE" });
-        setProfile((prev) => prev ? { ...prev, is_following: false, follower_count: prev.follower_count - 1 } : prev);
-      } else {
-        await apiFetch(`/api/users/${profile.username}/follow`, { method: "POST" });
-        setProfile((prev) => prev ? { ...prev, is_following: true, follower_count: prev.follower_count + 1 } : prev);
-      }
-    } catch { /* ignore */ }
+      await apiFetch(`/api/users/${profile.username}/follow`, {
+        method: wasFollowing ? "DELETE" : "POST",
+      });
+      clearProfileCache(profile.username);
+    } catch {
+      setProfile((prev) => prev ? {
+        ...prev,
+        is_following: wasFollowing,
+        follower_count: prev.follower_count + (wasFollowing ? 1 : -1),
+      } : prev);
+    }
     finally { setFollowLoading(false); }
   }
 
