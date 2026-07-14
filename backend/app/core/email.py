@@ -1,20 +1,31 @@
 """Email delivery.
 
-When SMTP is configured (see Settings.smtp_*), sends real mail through any
-standard provider — Gmail, Brevo, Amazon SES, etc. When it isn't, falls back to
-printing the link to stdout so local development needs no mail account. Sends are
-best-effort: a provider outage logs an error rather than failing the request, so a
-verification email hiccup never blocks account creation itself.
+Three delivery modes, picked in order:
+1. RESEND_API_KEY set → Resend's HTTPS API. Preferred in production: many hosts
+   (Railway trial plans included) block outbound SMTP ports entirely, while
+   HTTPS is never blocked.
+2. SMTP configured (see Settings.smtp_*) → real mail through any standard
+   provider — Resend, Gmail, Brevo, Amazon SES, etc.
+3. Neither → prints the link to stdout so local development needs no mail account.
+
+Sends are best-effort: a provider outage logs an error rather than failing the
+request, so a verification email hiccup never blocks account creation itself.
 """
 
 import smtplib
 import ssl
 from email.message import EmailMessage
 
+import httpx
+
 from app.config import settings
 
 
 def _send(to_email: str, subject: str, heading: str, body_line: str, button_text: str, link: str) -> None:
+    if settings.resend_api_key:
+        _send_via_resend_api(to_email, subject, heading, body_line, button_text, link)
+        return
+
     if not settings.email_configured:
         _print_stub(to_email, subject, link)
         return
@@ -32,6 +43,26 @@ def _send(to_email: str, subject: str, heading: str, body_line: str, button_text
                 server.starttls(context=ssl.create_default_context())
             server.login(settings.smtp_user, settings.smtp_password)
             server.send_message(msg)
+    except Exception as exc:  # noqa: BLE001 — never let mail failure break the flow
+        print(f"[EMAIL ERROR] Could not send to {to_email}: {exc}", flush=True)
+
+
+def _send_via_resend_api(to_email: str, subject: str, heading: str, body_line: str, button_text: str, link: str) -> None:
+    try:
+        response = httpx.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {settings.resend_api_key}"},
+            json={
+                "from": settings.smtp_from,
+                "to": [to_email],
+                "subject": subject,
+                "text": f"{heading}\n\n{body_line}\n\n{button_text}: {link}\n",
+                "html": _html(heading, body_line, button_text, link),
+            },
+            timeout=15,
+        )
+        if response.status_code >= 400:
+            print(f"[EMAIL ERROR] Resend API {response.status_code} for {to_email}: {response.text}", flush=True)
     except Exception as exc:  # noqa: BLE001 — never let mail failure break the flow
         print(f"[EMAIL ERROR] Could not send to {to_email}: {exc}", flush=True)
 

@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     vapid_private_key: str = ""
     vapid_subject: str = ""  # "mailto:you@example.com" — required by push services
 
+    # Resend HTTPS API key. When set, emails go through Resend's HTTP API instead
+    # of SMTP — preferred in production because many hosts (Railway trial plans
+    # included) block outbound SMTP ports, while HTTPS always works. The sender
+    # address still comes from smtp_from.
+    resend_api_key: str = ""
+
     # SMTP for real email delivery. Leave smtp_host empty to use the dev stub
     # (prints links to stdout). Works with any provider: Gmail, Brevo, SES, etc.
     smtp_host: str = ""
