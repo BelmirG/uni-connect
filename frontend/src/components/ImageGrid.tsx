@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 
 function Lightbox({ urls, startIndex, onClose }: { urls: string[]; startIndex: number; onClose: () => void }) {
   const [idx, setIdx] = useState(startIndex);
-  const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
 
   function prev() { setIdx((i) => Math.max(0, i - 1)); }
   function next() { setIdx((i) => Math.min(urls.length - 1, i + 1)); }
@@ -29,24 +29,28 @@ function Lightbox({ urls, startIndex, onClose }: { urls: string[]; startIndex: n
     <div
       onClick={onClose}
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 1001, display: "flex", alignItems: "center", justifyContent: "center" }}
-      onTouchStart={(e) => setTouchStartX(e.touches[0].clientX)}
+      onTouchStart={(e) => setTouchStart({ x: e.touches[0].clientX, y: e.touches[0].clientY })}
       onTouchEnd={(e) => {
-        if (touchStartX === null) return;
-        const dx = touchStartX - e.changedTouches[0].clientX;
+        if (touchStart === null) return;
+        const dx = touchStart.x - e.changedTouches[0].clientX;
+        const dy = e.changedTouches[0].clientY - touchStart.y;
+        setTouchStart(null);
+        // Vertical swipe (either direction) dismisses — the gesture every
+        // native photo viewer supports; essential in the home-screen app.
+        if (Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx)) { onClose(); return; }
         if (dx > 40) next();
         else if (dx < -40) prev();
-        setTouchStartX(null);
       }}
     >
-      {/* Close */}
+      {/* Close — kept below the iPhone notch/status bar via safe-area inset */}
       <button
         onClick={onClose}
-        style={{ position: "absolute", top: 16, right: 16, background: "rgba(255,255,255,0.1)", border: "none", color: "#fff", borderRadius: "50%", width: 38, height: 38, fontSize: "1.3rem", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1 }}
+        style={{ position: "absolute", top: "calc(env(safe-area-inset-top, 0px) + 16px)", right: 16, background: "rgba(255,255,255,0.1)", border: "none", color: "#fff", borderRadius: "50%", width: 38, height: 38, fontSize: "1.3rem", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1 }}
       >×</button>
 
       {/* Counter */}
       {urls.length > 1 && (
-        <div style={{ position: "absolute", top: 20, left: "50%", transform: "translateX(-50%)", color: "#fff", fontSize: "0.85rem", background: "rgba(0,0,0,0.4)", padding: "0.2rem 0.7rem", borderRadius: 12 }}>
+        <div style={{ position: "absolute", top: "calc(env(safe-area-inset-top, 0px) + 20px)", left: "50%", transform: "translateX(-50%)", color: "#fff", fontSize: "0.85rem", background: "rgba(0,0,0,0.4)", padding: "0.2rem 0.7rem", borderRadius: 12 }}>
           {idx + 1} / {urls.length}
         </div>
       )}

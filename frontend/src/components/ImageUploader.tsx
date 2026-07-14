@@ -242,7 +242,7 @@ export function ImageUploader({ onUrlsChange, maxImages = 5 }: Props) {
             aria-label="Close preview"
             style={{
               position: "absolute",
-              top: 16,
+              top: "calc(env(safe-area-inset-top, 0px) + 16px)",
               right: 16,
               width: 36,
               height: 36,
