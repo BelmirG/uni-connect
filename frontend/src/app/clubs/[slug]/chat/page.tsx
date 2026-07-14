@@ -380,6 +380,7 @@ export default function ClubChatPage() {
   const lastTypingSentRef = useRef(0);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const msgRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -388,7 +389,13 @@ export default function ClubChatPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+  // Scroll ONLY the message list, never the window: scrollIntoView also
+  // scrolls every scrollable ancestor, and with the iOS keyboard open that
+  // pans the whole page, leaving the composer stranded off-screen after send.
+  useEffect(() => {
+    const el = listRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [messages]);
 
   useEffect(() => {
     let cancelled = false;
@@ -518,7 +525,16 @@ export default function ClubChatPage() {
     if (!target) return;
     const el = msgRefs.current.get(target.id);
     if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    const container = listRef.current;
+    if (container) {
+      // Container-only scroll (see the auto-scroll effect above for why).
+      const cRect = container.getBoundingClientRect();
+      const eRect = el.getBoundingClientRect();
+      container.scrollTo({
+        top: container.scrollTop + (eRect.top - cRect.top) - container.clientHeight / 2 + eRect.height / 2,
+        behavior: "smooth",
+      });
+    }
     el.style.transition = "none";
     el.style.backgroundColor = "rgba(56,101,166,0.12)";
     el.style.borderRadius = "12px";
@@ -547,7 +563,9 @@ export default function ClubChatPage() {
   const mediaDocs = allAttachments.filter((a) => !a.mime_type.startsWith("image/"));
 
   return (
-    <main className="flex flex-col bg-background max-w-[700px] w-full mx-auto overflow-hidden" style={{ height: "100svh" }}>
+    // dvh (not svh): tracks the live viewport, so when the on-screen keyboard
+    // resizes it (interactive-widget=resizes-content) the composer stays visible.
+    <main className="flex flex-col bg-background max-w-[700px] w-full mx-auto overflow-hidden" style={{ height: "100dvh" }}>
 
       {/* Header — glass */}
       <div
@@ -593,7 +611,7 @@ export default function ClubChatPage() {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 py-4 flex flex-col gap-1">
+      <div ref={listRef} className="flex-1 overflow-y-auto px-3 py-4 flex flex-col gap-1">
         {messages.length === 0 && status === "connected" && (
           <p className="text-on-surface-variant text-sm text-center m-auto">No messages yet. Say hello!</p>
         )}

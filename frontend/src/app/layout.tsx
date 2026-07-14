@@ -37,6 +37,10 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",
+  // On browsers that support it (incl. recent iOS), the on-screen keyboard
+  // shrinks the layout instead of panning the page — so chat composers stay
+  // visible above the keyboard rather than being pushed off-screen.
+  interactiveWidget: "resizes-content",
   themeColor: "#ffffff",
 };
 
