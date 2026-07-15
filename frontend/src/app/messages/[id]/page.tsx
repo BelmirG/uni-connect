@@ -6,7 +6,7 @@ import { useRouter, useParams } from "next/navigation";
 import { apiFetch, ApiError } from "@/lib/api";
 import { openChatSocket, type ChatSocket } from "@/lib/chatSocket";
 import { getDmCache, saveDmCache } from "@/lib/chatCache";
-import { ArrowLeft, Send, MoreVertical, Trash2, X, CornerUpLeft, Plus, ImageIcon, FileText, Download, ExternalLink, GalleryHorizontalEnd, ChevronLeft, ChevronRight, Bell } from "lucide-react";
+import { ArrowLeft, Send, MoreVertical, Trash2, X, CornerUpLeft, Plus, ImageIcon, FileText, Download, ExternalLink, GalleryHorizontalEnd, ChevronLeft, ChevronRight, Bell, Check, ListChecks } from "lucide-react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import MiniAvatar from "@/components/MiniAvatar";
@@ -166,17 +166,21 @@ function SharedPostCard({ post, isOwn }: { post: SharedPost; isOwn: boolean }) {
 }
 
 function SwipeableMessage({
-  msg, isOwn, isHovered, onSwipe, onScrollToQuote, onHoverEnter, onHoverLeave, onPreviewImage, onRetry, msgRef,
+  msg, isOwn, isHovered, selectMode, selected, onSwipe, onScrollToQuote, onHoverEnter, onHoverLeave, onPreviewImage, onRetry, onToggleSelect, onLongPress, msgRef,
 }: {
   msg: DmMessage;
   isOwn: boolean;
   isHovered: boolean;
+  selectMode: boolean;
+  selected: boolean;
   onSwipe: (msg: DmMessage) => void;
   onScrollToQuote: (quote: string) => void;
   onHoverEnter: () => void;
   onHoverLeave: () => void;
   onPreviewImage: (urls: string[], index: number) => void;
   onRetry: () => void;
+  onToggleSelect: () => void;
+  onLongPress: () => void;
   msgRef: (el: HTMLDivElement | null) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -187,21 +191,54 @@ function SwipeableMessage({
   const onSwipeRef = useRef(onSwipe);
   const [offset, setOffset] = useState(0);
 
-  useEffect(() => { onSwipeRef.current = onSwipe; });
+  // Only your own, server-confirmed messages can be selected for deletion.
+  const selectable = isOwn && !msg.pending && !msg.failed;
+
+  // The touch handlers below are bound once, so anything they need at
+  // event-time lives in refs.
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFired = useRef(false);
+  const selectModeRef = useRef(selectMode);
+  const selectableRef = useRef(selectable);
+  const onLongPressRef = useRef(onLongPress);
+
+  useEffect(() => {
+    onSwipeRef.current = onSwipe;
+    selectModeRef.current = selectMode;
+    selectableRef.current = selectable;
+    onLongPressRef.current = onLongPress;
+  });
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+    const cancelHold = () => {
+      if (holdTimer.current) {
+        clearTimeout(holdTimer.current);
+        holdTimer.current = null;
+      }
+    };
     const ts = (e: TouchEvent) => {
       startX.current = e.touches[0].clientX;
       startY.current = e.touches[0].clientY;
       tracking.current = false;
+      longPressFired.current = false;
       offsetRef.current = 0;
       setOffset(0);
+      // Press-and-hold on your own message enters selection mode.
+      if (!selectModeRef.current && selectableRef.current) {
+        holdTimer.current = setTimeout(() => {
+          holdTimer.current = null;
+          longPressFired.current = true;
+          onLongPressRef.current();
+        }, 450);
+      }
     };
     const tm = (e: TouchEvent) => {
       const dx = e.touches[0].clientX - startX.current;
       const dy = e.touches[0].clientY - startY.current;
+      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) cancelHold();
+      if (selectModeRef.current || longPressFired.current) return; // no swipe-reply while selecting
       if (!tracking.current) {
         if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
         if (Math.abs(dy) >= Math.abs(dx)) return;
@@ -215,6 +252,12 @@ function SwipeableMessage({
       }
     };
     const te = () => {
+      cancelHold();
+      if (longPressFired.current) {
+        offsetRef.current = 0;
+        setOffset(0);
+        return;
+      }
       if (offsetRef.current >= 40) onSwipeRef.current(msg);
       offsetRef.current = 0;
       setOffset(0);
@@ -223,6 +266,7 @@ function SwipeableMessage({
     el.addEventListener("touchmove", tm, { passive: false });
     el.addEventListener("touchend", te);
     return () => {
+      cancelHold();
       el.removeEventListener("touchstart", ts);
       el.removeEventListener("touchmove", tm);
       el.removeEventListener("touchend", te);
@@ -235,9 +279,25 @@ function SwipeableMessage({
   return (
     <div
       ref={(el) => { containerRef.current = el; msgRef(el); }}
-      className={cn("flex w-full items-end gap-1.5", isOwn ? "flex-row-reverse" : "flex-row")}
+      className={cn(
+        "flex w-full items-end gap-1.5",
+        isOwn ? "flex-row-reverse" : "flex-row",
+        selectMode && "select-none",
+        selectMode && !selectable && "opacity-40",
+        selectMode && selectable && "cursor-pointer"
+      )}
+      // Suppress the iOS long-press callout so press-and-hold reliably enters
+      // selection mode instead of the system menu.
+      style={{ WebkitTouchCallout: "none" }}
       onMouseEnter={onHoverEnter}
       onMouseLeave={onHoverLeave}
+      // In selection mode a tap anywhere on the row toggles it — capture phase
+      // so inner links/images/buttons don't fire instead.
+      onClickCapture={selectMode ? (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (selectable) onToggleSelect();
+      } : undefined}
     >
       {!isOwn && (
         <div className="flex-shrink-0 mb-0.5">
@@ -250,7 +310,8 @@ function SwipeableMessage({
           "max-w-[80%] sm:max-w-[72%] px-3.5 py-2.5 text-sm leading-snug flex flex-col",
           isOwn
             ? "text-white rounded-2xl rounded-br-md shadow-sm"
-            : "bg-surface-container text-on-surface rounded-2xl rounded-bl-md"
+            : "bg-surface-container text-on-surface rounded-2xl rounded-bl-md",
+          selected && "ring-2 ring-primary/70"
         )}
         style={{
           background: isOwn ? OWN_BUBBLE_BG : undefined,
@@ -294,18 +355,32 @@ function SwipeableMessage({
         )}
       </div>
 
-      <button
-        onClick={() => { onHoverLeave(); onSwipeRef.current(msg); }}
-        className="flex-shrink-0 self-center p-1 rounded-full text-on-surface-variant"
-        style={{
-          opacity: replyBtnOpacity,
-          transition: offset === 0 ? "opacity 0.15s" : "none",
-          pointerEvents: replyBtnOpacity > 0 ? "auto" : "none",
-        }}
-        tabIndex={-1}
-      >
-        <CornerUpLeft className="w-3.5 h-3.5" />
-      </button>
+      {!selectMode && (
+        <button
+          onClick={() => { onHoverLeave(); onSwipeRef.current(msg); }}
+          className="flex-shrink-0 self-center p-1 rounded-full text-on-surface-variant"
+          style={{
+            opacity: replyBtnOpacity,
+            transition: offset === 0 ? "opacity 0.15s" : "none",
+            pointerEvents: replyBtnOpacity > 0 ? "auto" : "none",
+          }}
+          tabIndex={-1}
+        >
+          <CornerUpLeft className="w-3.5 h-3.5" />
+        </button>
+      )}
+      {/* Selection circle — last flex child, so on own (row-reversed) rows it
+          sits at the far left edge, WhatsApp-style. */}
+      {selectMode && selectable && (
+        <span
+          className={cn(
+            "flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center self-center transition-colors",
+            selected ? "bg-primary border-primary text-primary-foreground" : "border-outline-variant"
+          )}
+        >
+          {selected && <Check className="w-3 h-3" />}
+        </span>
+      )}
     </div>
   );
 }
@@ -420,6 +495,9 @@ export default function ConversationPage() {
   const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [otherTyping, setOtherTyping] = useState(false);
   const [queuedSend, setQueuedSend] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const typingClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTypingSentRef = useRef(0);
@@ -478,7 +556,19 @@ export default function ConversationPage() {
   }
 
   function handleIncoming(data: unknown) {
-    const evt = data as { event?: string; username?: string };
+    const evt = data as { event?: string; username?: string; ids?: string[] };
+    // Someone deleted messages — drop those bubbles live on both sides.
+    if (evt.event === "messages_deleted") {
+      const gone = new Set(evt.ids ?? []);
+      if (gone.size) {
+        setMessages((prev) => prev.filter((m) => !gone.has(m.id)));
+        setSelectedIds((prev) => {
+          const next = new Set(Array.from(prev).filter((mid) => !gone.has(mid)));
+          return next.size === prev.size ? prev : next;
+        });
+      }
+      return;
+    }
     // Ephemeral typing signal — show the indicator briefly, don't store anything.
     if (evt.event === "typing") {
       if (evt.username === otherUsernameRef.current) {
@@ -741,6 +831,40 @@ export default function ConversationPage() {
     apiFetch(`/api/messages/${id}/mute`, { method: newMuted ? "POST" : "DELETE" }).catch(() => setIsMuted(!newMuted));
   }
 
+  function toggleSelect(msgId: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(msgId)) next.delete(msgId);
+      else next.add(msgId);
+      return next;
+    });
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }
+
+  async function deleteSelected() {
+    if (selectedIds.size === 0 || deleting) return;
+    const n = selectedIds.size;
+    if (!window.confirm(`Delete ${n} message${n > 1 ? "s" : ""}? They will be removed for both of you.`)) return;
+    setDeleting(true);
+    try {
+      await apiFetch(`/api/messages/${id}/messages/delete`, {
+        method: "POST",
+        body: JSON.stringify({ message_ids: Array.from(selectedIds) }),
+      });
+      // The WS broadcast also removes them, but don't wait for the round-trip.
+      setMessages((prev) => prev.filter((m) => !selectedIds.has(m.id)));
+      exitSelectMode();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Could not delete messages.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   async function handleDeleteConversation() {
     if (!window.confirm("Delete this conversation? This cannot be undone.")) return;
     setMenuOpen(false);
@@ -766,6 +890,29 @@ export default function ConversationPage() {
         className="flex items-center gap-3 px-4 py-3 flex-shrink-0 border-b border-outline-variant/50"
         style={{ background: "rgba(255,255,255,0.88)", backdropFilter: "blur(20px) saturate(160%)", WebkitBackdropFilter: "blur(20px) saturate(160%)" }}
       >
+        {selectMode ? (
+          <>
+            <button
+              onClick={exitSelectMode}
+              className="flex items-center text-on-surface-variant hover:text-on-surface transition-colors flex-shrink-0"
+              aria-label="Cancel selection"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <p className="flex-1 font-semibold text-sm text-on-surface">
+              {selectedIds.size} selected
+            </p>
+            <button
+              onClick={deleteSelected}
+              disabled={selectedIds.size === 0 || deleting}
+              className="p-2 rounded-full text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-40 flex-shrink-0"
+              aria-label="Delete selected messages"
+            >
+              <Trash2 className="w-5 h-5" />
+            </button>
+          </>
+        ) : (
+          <>
         <Link href="/messages" className="flex items-center text-on-surface-variant hover:text-on-surface transition-colors no-underline flex-shrink-0">
           <ArrowLeft className="w-5 h-5" />
         </Link>
@@ -825,6 +972,10 @@ export default function ConversationPage() {
                     <span style={{ display: "inline-block", width: 14, height: 14, borderRadius: "50%", background: "white", boxShadow: "0 1px 2px rgba(0,0,0,0.2)", transition: "transform 0.3s", transform: isMuted ? "translateX(3px)" : "translateX(19px)" }} />
                   </div>
                 </div>
+                <button onClick={() => { setMenuOpen(false); setSelectMode(true); }} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "10px 16px", fontSize: "0.875rem", background: "none", border: "none", borderTop: "1px solid rgba(0,0,0,0.06)", cursor: "pointer" }} onMouseEnter={e => (e.currentTarget.style.background = "#f5f5f5")} onMouseLeave={e => (e.currentTarget.style.background = "none")}>
+                  <ListChecks style={{ width: 14, height: 14, color: "#6b7280", flexShrink: 0 }} />
+                  Delete messages
+                </button>
                 <button onClick={handleDeleteConversation} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "10px 16px", fontSize: "0.875rem", background: "none", border: "none", borderTop: "1px solid rgba(0,0,0,0.06)", cursor: "pointer", color: "#ef4444" }} onMouseEnter={e => (e.currentTarget.style.background = "#fef2f2")} onMouseLeave={e => (e.currentTarget.style.background = "none")}>
                   <Trash2 style={{ width: 14, height: 14, flexShrink: 0 }} />
                   Delete chat
@@ -834,6 +985,8 @@ export default function ConversationPage() {
             document.body
           )}
         </div>
+          </>
+        )}
       </div>
 
       {/* Messages */}
@@ -855,6 +1008,10 @@ export default function ConversationPage() {
             msg={msg}
             isOwn={msg.sender.username === currentUsername}
             isHovered={hoveredMsgId === msg.id}
+            selectMode={selectMode}
+            selected={selectedIds.has(msg.id)}
+            onToggleSelect={() => toggleSelect(msg.id)}
+            onLongPress={() => { setSelectMode(true); toggleSelect(msg.id); }}
             onHoverEnter={() => setHoveredMsgId(msg.id)}
             onHoverLeave={() => setHoveredMsgId(null)}
             onSwipe={(m) => { setHoveredMsgId(null); setReplyTo(m); setTimeout(() => inputRef.current?.focus(), 50); }}

@@ -470,6 +470,58 @@ async def get_messages(
     }
 
 
+class DeleteMessagesRequest(BaseModel):
+    message_ids: list[str]
+
+
+@router.post("/{conversation_id}/messages/delete")
+async def delete_messages(
+    conversation_id: str,
+    body: DeleteMessagesRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete messages from this conversation, for both participants.
+    Only the caller's own messages qualify — IDs of the other person's
+    messages are silently ignored, never deleted."""
+    try:
+        conv_id = uuid.UUID(conversation_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conv_id)
+    )).scalar_one_or_none()
+    if not conv or (conv.user1_id != current_user.id and conv.user2_id != current_user.id):
+        raise HTTPException(status_code=403, detail="Access denied.")
+
+    ids: list[uuid.UUID] = []
+    for raw in body.message_ids[:100]:
+        try:
+            ids.append(uuid.UUID(raw))
+        except ValueError:
+            continue
+    if not ids:
+        return {"deleted": []}
+
+    owned = (await db.execute(
+        select(DirectMessage.id).where(
+            DirectMessage.conversation_id == conv_id,
+            DirectMessage.sender_id == current_user.id,
+            DirectMessage.id.in_(ids),
+        )
+    )).scalars().all()
+    if owned:
+        await db.execute(delete(DirectMessage).where(DirectMessage.id.in_(owned)))
+        await db.commit()
+        # Both open chats (including the deleter's other tabs) drop the
+        # bubbles live, same channel the messages arrived on.
+        await redis.publish(f"dm:{conv_id}", json.dumps({
+            "event": "messages_deleted",
+            "ids": [str(i) for i in owned],
+        }))
+    return {"deleted": [str(i) for i in owned]}
+
+
 @router.delete("/{conversation_id}")
 async def delete_conversation(
     conversation_id: str,
