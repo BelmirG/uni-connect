@@ -4,7 +4,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from sqlalchemy import case, delete, func, or_, select, update
+from sqlalchemy import case, delete, func, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -414,9 +414,12 @@ async def mark_read(
 @router.get("/{conversation_id}")
 async def get_messages(
     conversation_id: str,
+    before: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Latest 50 messages; pass ?before=<message_id> to page back through
+    older history (returns the 50 messages preceding that one)."""
     try:
         conv_id = uuid.UUID(conversation_id)
     except ValueError:
@@ -437,16 +440,34 @@ async def get_messages(
     SharedPost = aliased(Post)
     PostAuthor = aliased(User)
 
-    rows = (await db.execute(
+    stmt = (
         select(DirectMessage, SenderUser, SharedPost, PostAuthor)
         .join(SenderUser, SenderUser.id == DirectMessage.sender_id)
         .outerjoin(SharedPost, SharedPost.id == DirectMessage.shared_post_id)
         .outerjoin(PostAuthor, PostAuthor.id == SharedPost.author_id)
         .where(DirectMessage.conversation_id == conv_id)
-        # Newest 50, then reversed for display — ascending+limit would return
-        # the OLDEST 50 and silently cut off recent messages in long chats.
-        .order_by(DirectMessage.created_at.desc())
-        .limit(50)
+    )
+    if before:
+        # (created_at, id) cursor — id breaks ties so identical timestamps
+        # can never skip or repeat a message across pages.
+        try:
+            before_id = uuid.UUID(before)
+            anchor = (await db.execute(
+                select(DirectMessage.created_at).where(
+                    DirectMessage.id == before_id,
+                    DirectMessage.conversation_id == conv_id,
+                )
+            )).scalar_one_or_none()
+            if anchor is not None:
+                stmt = stmt.where(
+                    tuple_(DirectMessage.created_at, DirectMessage.id) < (anchor, before_id)
+                )
+        except ValueError:
+            pass
+    rows = (await db.execute(
+        # Newest 50 of the window, then reversed for display — ascending+limit
+        # would return the OLDEST 50 and silently cut off recent messages.
+        stmt.order_by(DirectMessage.created_at.desc(), DirectMessage.id.desc()).limit(50)
     )).all()
     rows = list(reversed(rows))
 

@@ -4,7 +4,7 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -143,9 +143,12 @@ def _build_chat_payload(msg: ChatMessage, author: User) -> dict:
 async def get_chat_history(
     slug: str,
     limit: int = 50,
+    before: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Latest messages; pass ?before=<message_id> to page back through older
+    history (returns the messages preceding that one)."""
     club = (await db.execute(select(Club).where(Club.slug == slug))).scalar_one_or_none()
     if not club:
         raise HTTPException(status_code=404, detail="Club not found.")
@@ -158,12 +161,30 @@ async def get_chat_history(
     if not membership:
         raise HTTPException(status_code=403, detail="You must be a member to access club chat.")
 
-    rows = (await db.execute(
+    stmt = (
         select(ChatMessage, User)
         .join(User, ChatMessage.author_id == User.id)
         .where(ChatMessage.club_id == club.id, ChatMessage.is_deleted == False)
-        .order_by(ChatMessage.created_at.desc())
-        .limit(limit)
+    )
+    if before:
+        # (created_at, id) cursor — id breaks ties so identical timestamps
+        # can never skip or repeat a message across pages.
+        try:
+            before_id = uuid.UUID(before)
+            anchor = (await db.execute(
+                select(ChatMessage.created_at).where(
+                    ChatMessage.id == before_id, ChatMessage.club_id == club.id
+                )
+            )).scalar_one_or_none()
+            if anchor is not None:
+                stmt = stmt.where(
+                    tuple_(ChatMessage.created_at, ChatMessage.id) < (anchor, before_id)
+                )
+        except ValueError:
+            pass
+    rows = (await db.execute(
+        stmt.order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
+        .limit(min(max(limit, 1), 100))
     )).all()
 
     return list(reversed([_build_chat_payload(row[0], row[1]) for row in rows]))

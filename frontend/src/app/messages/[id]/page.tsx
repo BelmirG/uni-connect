@@ -517,6 +517,12 @@ export default function ConversationPage() {
   const pendingPayloadsRef = useRef<Map<string, Record<string, unknown>>>(new Map());
   const nearBottomRef = useRef(true);
   const didInitialScrollRef = useRef(false);
+  // Scroll-up pagination bookkeeping.
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const hasMoreRef = useRef(true);
+  const loadingOlderRef = useRef(false);
+  const prependHeightRef = useRef<number | null>(null);
+  const lastTailIdRef = useRef<string | null>(null);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   // Scroll ONLY the message list, never the window: scrollIntoView also
@@ -530,16 +536,55 @@ export default function ConversationPage() {
   useLayoutEffect(() => {
     const el = listRef.current;
     if (!el || messages.length === 0) return;
+    // An older page was just prepended: restore the reader's exact position
+    // (anchored to the bottom edge) so history loads without any visual jump.
+    if (prependHeightRef.current !== null) {
+      el.scrollTop = el.scrollHeight - prependHeightRef.current;
+      prependHeightRef.current = null;
+      return;
+    }
     if (!didInitialScrollRef.current) {
       el.scrollTop = el.scrollHeight;
       didInitialScrollRef.current = true;
+      lastTailIdRef.current = messages[messages.length - 1].id;
       return;
     }
     const last = messages[messages.length - 1];
-    const ownJustSent = !!(last && meRef.current && last.sender.username === meRef.current.username);
+    // Snap on own sends only when the tail actually changed — deleting
+    // messages mid-history must not yank the reader to the bottom.
+    const isNewTail = last.id !== lastTailIdRef.current;
+    lastTailIdRef.current = last.id;
+    const ownJustSent = isNewTail && !!(meRef.current && last.sender.username === meRef.current.username);
     if (ownJustSent) el.scrollTop = el.scrollHeight;
     else if (nearBottomRef.current) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [messages, otherTyping]);
+
+  // Scroll-up pagination: fetch the 50 messages before the oldest one on
+  // screen and prepend them, keeping the viewport visually anchored.
+  async function loadOlder() {
+    if (loadingOlderRef.current || !hasMoreRef.current) return;
+    const oldest = messagesRef.current.find((m) => !m.pending && !m.failed);
+    if (!oldest) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const page = await apiFetch<ConvResponse>(`/api/messages/${id}?before=${oldest.id}`);
+      const older = page.messages;
+      if (older.length < 50) hasMoreRef.current = false;
+      if (older.length > 0) {
+        const el = listRef.current;
+        if (el) prependHeightRef.current = el.scrollHeight - el.scrollTop;
+        setMessages((prev) => {
+          const seen = new Set(prev.map((m) => m.id));
+          return [...older.filter((m) => !seen.has(m.id)), ...prev];
+        });
+      }
+    } catch { /* scrolling up again retries */ }
+    finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }
 
   // Merge fresh server history with what's already on screen. Two things must
   // survive the merge:
@@ -551,6 +596,12 @@ export default function ConversationPage() {
   function mergeWithPending(server: DmMessage[], prev: DmMessage[]): DmMessage[] {
     const serverIds = new Set(server.map((s) => s.id));
     const newestServer = server.length ? server[server.length - 1].created_at : "";
+    const oldestServer = server.length ? server[0].created_at : "";
+    // Older pages the reader already scrolled back to stay loaded — a refetch
+    // only covers the newest window and must not wipe paged-in history.
+    const olderPrefix = prev.filter((m) =>
+      !m.pending && !m.failed && !serverIds.has(m.id) && oldestServer && m.created_at < oldestServer
+    );
     const liveExtras = prev.filter((m) =>
       !m.pending && !m.failed && !serverIds.has(m.id) && m.created_at > newestServer
     );
@@ -562,7 +613,7 @@ export default function ConversationPage() {
         (s.attachments?.length ?? 0) === (p.attachments?.length ?? 0)
       )
     );
-    return [...server, ...liveExtras, ...survivors];
+    return [...olderPrefix, ...server, ...liveExtras, ...survivors];
   }
 
   function handleIncoming(data: unknown) {
@@ -646,6 +697,9 @@ export default function ConversationPage() {
         setOtherUser(conv.other_user);
         setCurrentUsername(me.username);
         setIsMuted(conv.is_muted);
+        // A full first page means there may be older history to page into.
+        if (conv.messages.length >= 50) hasMoreRef.current = true;
+        else if (messagesRef.current.length <= conv.messages.length) hasMoreRef.current = false;
         setMessages((prev) => mergeWithPending(conv.messages, prev));
         return true;
       } catch (err: unknown) {
@@ -673,7 +727,9 @@ export default function ConversationPage() {
   useEffect(() => {
     if (!otherUser || !meRef.current || messages.length === 0) return;
     saveDmCache(id, {
-      messages: messages.filter((m) => !m.pending && !m.failed),
+      // Cap at the newest 50 — reopening starts from the same window a fresh
+      // fetch returns; older pages reload on scroll.
+      messages: messages.filter((m) => !m.pending && !m.failed).slice(-50),
       otherUser,
       isMuted,
       me: meRef.current,
@@ -1009,9 +1065,15 @@ export default function ConversationPage() {
         onScroll={(e) => {
           const el = e.currentTarget;
           nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+          if (el.scrollTop < 80) loadOlder();
           setHoveredMsgId(null);
         }}
       >
+        {loadingOlder && (
+          <div className="flex justify-center py-1.5 flex-shrink-0">
+            <span className="w-4 h-4 border-2 border-outline-variant rounded-full animate-spin" style={{ borderTopColor: IUS_BLUE }} />
+          </div>
+        )}
         {messages.length === 0 && status === "connected" && (
           <p className="text-on-surface-variant text-sm text-center m-auto">No messages yet. Say hello!</p>
         )}
