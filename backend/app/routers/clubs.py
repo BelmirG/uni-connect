@@ -618,6 +618,12 @@ async def get_club_members(
     current_user: User = Depends(get_current_user),
 ):
     club = await _get_club_or_404(slug, db)
+
+    if club.is_private:
+        membership = await _get_membership(club.id, current_user.id, db)
+        if not membership:
+            raise HTTPException(status_code=403, detail="This is a private club.")
+
     rows = (
         await db.execute(
             select(User.username, User.display_name, User.avatar_url, ClubMember.role, ClubMember.joined_at)
