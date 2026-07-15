@@ -14,6 +14,7 @@ from app.config import settings
 from app.core.rate_limit import rate_limit
 from app.database import get_db
 from app.models.club import Club
+from app.models.club_member import ClubMember
 from app.models.post import Post
 from app.models.report import Report
 from app.models.user import User
@@ -120,24 +121,34 @@ async def delete_user(
 ):
     """Permanently delete an account. Their votes, follows, memberships, messages,
     and anonymous-authorship links cascade away; their posts are kept but detached
-    (author set to null). Refuses if the user still owns clubs, because a club's
-    creator can't be null — reassign or remove those clubs first."""
+    (author set to null). Clubs they own pass to a moderator, else the
+    longest-standing member; a club with no other members is deleted with them."""
     user = await _get_user(username, db)
     if user.is_admin:
         raise HTTPException(status_code=400, detail="Cannot delete an admin account.")
 
-    owned = (await db.execute(
-        select(Club.name).where(Club.created_by == user.id)
+    owned_clubs = (await db.execute(
+        select(Club).where(Club.created_by == user.id)
     )).scalars().all()
-    if owned:
-        raise HTTPException(
-            status_code=409,
-            detail=f"User owns club(s): {', '.join(owned)}. Reassign or delete them first.",
-        )
+    succession: list[dict] = []
+    for club in owned_clubs:
+        heir = (await db.execute(
+            select(ClubMember)
+            .where(ClubMember.club_id == club.id, ClubMember.user_id != user.id)
+            .order_by((ClubMember.role != "moderator").asc(), ClubMember.joined_at.asc())
+            .limit(1)
+        )).scalar_one_or_none()
+        if heir:
+            heir.role = "owner"
+            club.created_by = heir.user_id
+            succession.append({"club": club.name, "action": "ownership transferred"})
+        else:
+            await db.delete(club)
+            succession.append({"club": club.name, "action": "deleted (no other members)"})
 
     await db.delete(user)
     await db.commit()
-    return {"ok": True, "username": username}
+    return {"ok": True, "username": username, "clubs": succession}
 
 
 @router.post("/users/{username}/ban")
