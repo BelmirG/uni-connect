@@ -255,16 +255,20 @@ async def get_user_info(
 async def list_posts(
     q: str = "",
     limit: int = 50,
+    deleted: bool = False,
     db: AsyncSession = Depends(get_db),
     _: str = Depends(_verify_admin_key),
 ):
     """Browse/search posts (any type) to find something to remove. Newest first.
+    Live and soft-deleted posts are separate views (`deleted` toggles them) so the
+    working list stays uncluttered while the audit trail stays reachable.
     Anonymous Q&A posts are shown without an author — admins de-anonymize through a
     separate audited endpoint, never here."""
     Author = aliased(User)
     stmt = (
         select(Post, Author)
         .outerjoin(Author, Author.id == Post.author_id)
+        .where(Post.is_deleted == deleted)
         .order_by(Post.created_at.desc())
         .limit(min(limit, 200))
     )

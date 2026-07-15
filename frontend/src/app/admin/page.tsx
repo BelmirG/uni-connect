@@ -359,15 +359,16 @@ function ReportsTab({ adminKey, flash }: { adminKey: string; flash: (m: string) 
 function PostsTab({ adminKey, flash }: { adminKey: string; flash: (m: string) => void }) {
   const [posts, setPosts] = useState<AdminPost[]>([]);
   const [q, setQ] = useState("");
+  const [showDeleted, setShowDeleted] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
     setLoading(true);
-    adminReq<AdminPost[]>(adminKey, `/api/admin/posts?q=${encodeURIComponent(q)}`)
+    adminReq<AdminPost[]>(adminKey, `/api/admin/posts?q=${encodeURIComponent(q)}&deleted=${showDeleted}`)
       .then(setPosts)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [adminKey, q]);
+  }, [adminKey, q, showDeleted]);
 
   useEffect(() => {
     const t = setTimeout(load, 250);
@@ -388,6 +389,21 @@ function PostsTab({ adminKey, flash }: { adminKey: string; flash: (m: string) =>
   return (
     <div>
       <SearchBar value={q} onChange={setQ} placeholder="Search post text…" />
+      <div className="flex gap-2 mb-3">
+        {([["Active", false], ["Deleted", true]] as const).map(([label, val]) => (
+          <button
+            key={label}
+            onClick={() => setShowDeleted(val)}
+            className={`px-4 h-9 rounded-full text-sm font-medium transition-colors ${
+              showDeleted === val
+                ? "bg-primary text-primary-foreground"
+                : "bg-surface-container text-on-surface-variant"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       {loading ? <Loading /> : posts.length === 0 ? <Empty label="No posts found." /> : (
         <div className="space-y-2">
           {posts.map((p) => (
