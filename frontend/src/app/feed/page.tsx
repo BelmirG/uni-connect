@@ -349,7 +349,17 @@ export default function FeedPage() {
         <div className="flex overflow-x-auto gap-2 mb-4 no-scrollbar pb-1 -mx-4 px-4">
           {feedTab === "discover" && (
             <>
-              <button onClick={() => setSort("hot")} className={pillCls(sort === "hot")}>Hot</button>
+              <button
+                onClick={() => setSort("hot")}
+                className={cn(
+                  "text-xs font-medium px-3.5 py-1.5 rounded-full transition-colors whitespace-nowrap",
+                  sort === "hot"
+                    ? "pill-ember text-white"
+                    : "bg-surface shadow-sm text-on-surface-variant hover:bg-surface-container"
+                )}
+              >
+                Hot
+              </button>
               <button onClick={() => setSort("new")} className={pillCls(sort === "new")}>New</button>
               <span className="w-px h-6 self-center bg-outline-variant flex-shrink-0" />
             </>
