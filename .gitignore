@@ -11,6 +11,7 @@ node_modules/
 
 # Environment — never commit real secrets
 .env
+.env.example
 .env.local
 .env.*.local
 
