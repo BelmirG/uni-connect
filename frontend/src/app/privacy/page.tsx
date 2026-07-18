@@ -45,7 +45,7 @@ export default function PrivacyPage() {
                 messages, club chat messages, uploaded photos and files, and bookmarks.
               </li>
               <li>
-                <strong>Anonymous Q&A authorship:</strong> when you post anonymously, your identity
+                <strong>Anonymous board authorship:</strong> when you post anonymously, your identity
                 is stored in a separate, access-restricted record — not in the post itself. See
                 Section 3.
               </li>
@@ -77,7 +77,7 @@ export default function PrivacyPage() {
             </ul>
           </Section>
 
-          <Section title="3. Anonymous Q&A — the privacy design">
+          <Section title="3. The Anonymous board — the privacy design">
             <p>
               When you post or answer anonymously, the post itself is stored with no author field
               at all — not hidden in the interface, but genuinely absent from the data returned to

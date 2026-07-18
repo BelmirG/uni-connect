@@ -29,7 +29,7 @@ const NAV = [
   },
   {
     href: "/qa",
-    label: "Q&A",
+    label: "Anonymous",
     activeColor: "#ffffff",
     activeBg: IUS_BLUE,
     icon: (

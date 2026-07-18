@@ -27,7 +27,7 @@ const FEATURES = [
   },
   {
     icon: HelpCircle,
-    title: "Anonymous Q&A",
+    title: "Anonymous",
     text: "Ask the questions you'd never ask out loud. Your identity stays sealed off from the post — by design.",
   },
   {

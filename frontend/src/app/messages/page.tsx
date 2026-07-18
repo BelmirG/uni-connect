@@ -35,6 +35,20 @@ interface ConversationItem {
   unread_count: number;
 }
 
+interface ClubChatItem {
+  slug: string;
+  name: string;
+  banner_url: string | null;
+  chat_muted: boolean;
+  last_message: {
+    content: string | null;
+    has_attachments: boolean;
+    sender_is_you: boolean;
+    sender_display_name: string;
+    created_at: string;
+  } | null;
+}
+
 function LastMsgPreview({ lm, unread }: { lm: LastMessage; unread: boolean }) {
   const iconCls = "w-3 h-3 flex-shrink-0";
   const text = lm.content ?? "";
@@ -62,6 +76,8 @@ function LastMsgPreview({ lm, unread }: { lm: LastMessage; unread: boolean }) {
 export default function MessagesPage() {
   const router = useRouter();
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
+  const [clubChats, setClubChats] = useState<ClubChatItem[]>([]);
+  const [tab, setTab] = useState<"dms" | "clubs">("dms");
   const [loading, setLoading] = useState(true);
   const [newOpen, setNewOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -74,15 +90,18 @@ export default function MessagesPage() {
   function reload() {
     if (loadingRef.current) return;
     loadingRef.current = true;
-    apiFetch<ConversationItem[]>("/api/messages")
-      .then(setConversations)
-      .catch(() => {})
-      .finally(() => { loadingRef.current = false; });
+    Promise.allSettled([
+      apiFetch<ConversationItem[]>("/api/messages").then(setConversations),
+      apiFetch<ClubChatItem[]>("/api/messages/club-chats").then(setClubChats),
+    ]).finally(() => { loadingRef.current = false; });
   }
 
   useEffect(() => {
-    apiFetch<ConversationItem[]>("/api/messages")
-      .then(setConversations)
+    Promise.all([
+      apiFetch<ConversationItem[]>("/api/messages"),
+      apiFetch<ClubChatItem[]>("/api/messages/club-chats"),
+    ])
+      .then(([convs, clubs]) => { setConversations(convs); setClubChats(clubs); })
       .catch((err: unknown) => {
         if (err instanceof ApiError && err.status === 401) router.replace("/login");
       })
@@ -107,19 +126,42 @@ export default function MessagesPage() {
           >
             <Search className="w-5 h-5" />
           </button>
-          <button
-            onClick={() => { setNewOpen(true); setNewError(null); setNewUsername(""); }}
-            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            New
-          </button>
+          {tab === "dms" && (
+            <button
+              onClick={() => { setNewOpen(true); setNewError(null); setNewUsername(""); }}
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              New
+            </button>
+          )}
         </div>
         <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} mode="chats" />
 
+        {/* DMs / Club chats group switch */}
+        <div className="flex gap-2 mb-4">
+          {([["dms", "DMs"], ["clubs", "Club chats"]] as const).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={cn(
+                "relative text-xs font-medium px-3.5 py-1.5 rounded-full transition-colors whitespace-nowrap",
+                tab === key
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-surface shadow-sm text-on-surface-variant hover:bg-surface-container"
+              )}
+            >
+              {label}
+              {key === "dms" && tab !== "dms" && conversations.some((c) => c.unread_count > 0) && (
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500" />
+              )}
+            </button>
+          ))}
+        </div>
+
         {/* List */}
         {loading && <SkeletonRowList />}
-        {!loading && conversations.length === 0 && (
+        {!loading && tab === "dms" && conversations.length === 0 && (
           <div className="flex flex-col items-center py-16 gap-3">
             <div className="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center">
               <Search className="w-5 h-5 text-on-surface-variant" />
@@ -129,8 +171,57 @@ export default function MessagesPage() {
             </p>
           </div>
         )}
+        {!loading && tab === "clubs" && clubChats.length === 0 && (
+          <div className="flex flex-col items-center py-16 gap-3">
+            <div className="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center">
+              <Search className="w-5 h-5 text-on-surface-variant" />
+            </div>
+            <p className="text-on-surface-variant text-sm text-center">
+              No club chats yet.<br />
+              <Link href="/clubs" className="text-primary font-semibold">Join a club</Link> to start chatting.
+            </p>
+          </div>
+        )}
 
-        <div className="space-y-2 stagger-children">
+        {!loading && tab === "clubs" && (
+          <div className="space-y-2 stagger-children">
+            {clubChats.map((c) => (
+              <Link
+                key={c.slug}
+                href={`/clubs/${c.slug}/chat`}
+                className="flex items-center gap-3 px-4 py-3 rounded-2xl shadow-sm no-underline bg-surface hover:bg-surface-container-low transition-colors"
+              >
+                <div className="w-[42px] h-[42px] rounded-2xl overflow-hidden flex-shrink-0 bg-gradient-to-br from-secondary/25 to-secondary/5 flex items-center justify-center">
+                  {c.banner_url ? (
+                    <img src={c.banner_url} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-sm font-bold text-secondary uppercase">{c.name.charAt(0)}</span>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2 mb-0.5">
+                    <span className="text-sm font-semibold text-on-surface truncate">{c.name}</span>
+                    {c.last_message && (
+                      <span className="text-[11px] text-on-surface-variant flex-shrink-0">
+                        {timeAgo(c.last_message.created_at)}
+                      </span>
+                    )}
+                  </div>
+                  {c.last_message ? (
+                    <p className="text-xs text-on-surface-variant truncate">
+                      {c.last_message.sender_is_you ? "You" : c.last_message.sender_display_name}:{" "}
+                      {c.last_message.content || (c.last_message.has_attachments ? "Attachment" : "")}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-on-surface-variant">No messages yet</p>
+                  )}
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
+
+        <div className={cn("space-y-2 stagger-children", tab !== "dms" && "hidden")}>
           {conversations.map((c) => {
             const unread = c.unread_count > 0;
             return (

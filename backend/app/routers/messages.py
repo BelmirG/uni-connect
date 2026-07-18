@@ -14,6 +14,9 @@ from app.core.redis import redis
 from app.core.security import decode_access_token
 from app.database import AsyncSessionLocal, get_db
 from app.dependencies import get_current_user
+from app.models.chat_message import ChatMessage
+from app.models.club import Club
+from app.models.club_member import ClubMember
 from app.models.conversation import Conversation
 from app.models.direct_message import DirectMessage
 from app.models.post import Post
@@ -221,6 +224,66 @@ async def list_conversations(
             "unread_count": r.unread_count,
         })
     return result
+
+
+@router.get("/club-chats")
+async def list_club_chats(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Club chats for the Messages screen: every club the user belongs to,
+    previewed with its latest chat message (newest activity first). Must be
+    registered before the /{conversation_id} routes or "club-chats" would be
+    swallowed as a conversation id."""
+    memberships = (await db.execute(
+        select(Club, ClubMember.chat_muted)
+        .join(ClubMember, ClubMember.club_id == Club.id)
+        .where(ClubMember.user_id == current_user.id)
+    )).all()
+    if not memberships:
+        return []
+
+    club_ids = [club.id for club, _ in memberships]
+    # DISTINCT ON (club_id) with a matching order_by = latest message per club.
+    last_rows = (await db.execute(
+        select(ChatMessage, User)
+        .join(User, ChatMessage.author_id == User.id)
+        .where(ChatMessage.club_id.in_(club_ids), ChatMessage.is_deleted == False)  # noqa: E712
+        .distinct(ChatMessage.club_id)
+        .order_by(ChatMessage.club_id, ChatMessage.created_at.desc(), ChatMessage.id.desc())
+    )).all()
+    last_by_club = {msg.club_id: (msg, author) for msg, author in last_rows}
+
+    items = []
+    for club, chat_muted in memberships:
+        last = last_by_club.get(club.id)
+        last_payload = None
+        if last:
+            msg, author = last
+            last_payload = {
+                "content": msg.content,
+                "has_attachments": bool(msg.attachments),
+                "sender_is_you": author.id == current_user.id,
+                "sender_display_name": author.display_name,
+                "created_at": msg.created_at.isoformat(),
+            }
+        items.append({
+            "slug": club.slug,
+            "name": club.name,
+            "banner_url": club.banner_url,
+            "chat_muted": chat_muted,
+            "last_message": last_payload,
+            "_sort": last[0].created_at if last else None,
+        })
+    # Active chats first (newest message on top), silent clubs after, A→Z.
+    items.sort(key=lambda i: (
+        i["_sort"] is None,
+        -i["_sort"].timestamp() if i["_sort"] else 0,
+        i["name"].lower(),
+    ))
+    for i in items:
+        del i["_sort"]
+    return items
 
 
 class OpenRequest(BaseModel):

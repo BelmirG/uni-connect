@@ -86,9 +86,9 @@ export default function TermsPage() {
             </p>
           </Section>
 
-          <Section title="5. The anonymous Q&A board — how anonymity actually works">
+          <Section title="5. The Anonymous board — how anonymity actually works">
             <p>
-              The Q&A board lets you post questions and answers without your name or profile being
+              The Anonymous board lets you post questions and answers without your name or profile being
               shown to other users. This is a real technical design, not a cosmetic label: ordinary
               posts and API responses never contain the author's identity for anonymous content.
             </p>

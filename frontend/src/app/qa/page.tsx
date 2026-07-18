@@ -308,7 +308,7 @@ export default function QAPage() {
         {/* Header */}
         <div className="mb-4">
           <div className="flex items-center justify-between mb-1">
-            <h1 className="text-xl font-bold text-on-surface">Anonymous Q&amp;A</h1>
+            <h1 className="text-xl font-bold text-on-surface">Anonymous</h1>
             <button
               onClick={() => setSearchOpen(true)}
               aria-label="Search"

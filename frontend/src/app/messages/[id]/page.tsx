@@ -157,7 +157,7 @@ function SharedPostCard({ post, isOwn }: { post: SharedPost; isOwn: boolean }) {
     <Link href={href} className={cn("mt-1.5 px-3 py-2 rounded-xl text-xs block no-underline border-l-2", isOwn ? "bg-white/15 text-white border-white/40" : "bg-surface-container text-on-surface border-primary/40")}>
       <p className="font-semibold mb-0.5">
         {post.author?.display_name ?? "Unknown"}
-        {isQA && <span className="font-normal opacity-60 ml-1">· Anonymous Q&A</span>}
+        {isQA && <span className="font-normal opacity-60 ml-1">· Anonymous</span>}
       </p>
       <p className="opacity-80 whitespace-pre-wrap">
         {(post.content ?? "").slice(0, 120)}{(post.content ?? "").length > 120 ? "…" : ""}

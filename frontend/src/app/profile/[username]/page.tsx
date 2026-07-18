@@ -29,7 +29,7 @@ const NOTIF_CATEGORIES: [string, string][] = [
   ["follows", "New followers"],
   ["milestones", "Upvote milestones"],
   ["clubs", "Club activity"],
-  ["qa_answers", "Q&A answers"],
+  ["qa_answers", "Anonymous answers"],
 ];
 
 // ── types ─────────────────────────────────────────────────────────────────────

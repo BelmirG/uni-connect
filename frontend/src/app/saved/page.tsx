@@ -103,7 +103,7 @@ export default function SavedPostsPage() {
                   <p className="text-[11px] text-on-surface-variant mt-0.5">
                     {timeAgo(post.created_at)}
                     {post.edited_at && <span className="italic"> · edited</span>}
-                    {post.post_type === "anonymous_qa" && <span> · Q&amp;A</span>}
+                    {post.post_type === "anonymous_qa" && <span> · Anonymous</span>}
                   </p>
                 </div>
               </div>
