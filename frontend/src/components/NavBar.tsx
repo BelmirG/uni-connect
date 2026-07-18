@@ -89,9 +89,15 @@ export default function NavBar() {
   // unmounts, so this state survives client-side navigation.
   const [lastRoutes, setLastRoutes] = useState<Record<string, string>>({});
   useEffect(() => {
-    const section = NAV.find((item) =>
-      item.href === "/profile" ? pathname.startsWith("/profile") : pathname.startsWith(item.href)
-    );
+    // Club chat lives under /clubs/[slug]/chat in the URL, but its entry point
+    // is Messages → Club chats — so remember it under the Messages tab, never
+    // as the Clubs tab's return point (that would lock Clubs out of the list).
+    const isClubChat = /^\/clubs\/[^/]+\/chat/.test(pathname);
+    const section = isClubChat
+      ? NAV.find((item) => item.href === "/messages")
+      : NAV.find((item) =>
+          item.href === "/profile" ? pathname.startsWith("/profile") : pathname.startsWith(item.href)
+        );
     // The Profile tab always points at your own profile, so it isn't remembered.
     if (section && section.href !== "/profile") {
       setLastRoutes((prev) => (prev[section.href] === pathname ? prev : { ...prev, [section.href]: pathname }));
