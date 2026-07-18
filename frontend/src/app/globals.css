@@ -332,12 +332,20 @@
   box-shadow: 0 0 12px rgba(249, 115, 22, 0.45);
   animation: emberShift 3s ease-in-out infinite;
 }
+/* Active "New" sort pill — a slow drift through spring greens reads as
+   freshness, the counterpart to .pill-ember's heat. */
+.pill-fresh {
+  background: linear-gradient(115deg, #10b981, #34d399 40%, #2dd4bf 65%, #10b981);
+  background-size: 300% 100%;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.45);
+  animation: emberShift 3s ease-in-out infinite;
+}
 @keyframes emberShift {
   0%, 100% { background-position: 0% 50%; }
   50%      { background-position: 100% 50%; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .pill-ember { animation: none; }
+  .pill-ember, .pill-fresh { animation: none; }
 }
 
 @layer utilities {
