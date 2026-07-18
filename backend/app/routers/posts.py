@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, case, func, literal, literal_column, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -10,6 +11,7 @@ from app.core.mentions import extract_mention_usernames, notify_post_mentions
 from app.core.notify import notify
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.models.anonymous_post_author import AnonymousPostAuthor
 from app.models.bookmark import Bookmark
 from app.models.club import Club
 from app.models.club_member import ClubMember
@@ -17,6 +19,7 @@ from app.models.direct_message import DirectMessage
 from app.models.follow import Follow
 from app.models.poll import PollOption, PollVote
 from app.models.post import Post
+from app.models.report import Report
 from app.models.user import User
 from app.models.vote import Vote
 from app.schemas.post import (
@@ -846,3 +849,59 @@ async def delete_post(
     post.is_deleted = True
     post.deleted_at = datetime.now(timezone.utc)
     await db.commit()
+
+
+class ReportPostRequest(BaseModel):
+    reason: str = Field(min_length=10, max_length=500)
+
+
+@router.post("/{post_id}/report", status_code=status.HTTP_201_CREATED)
+async def report_post(
+    post_id: uuid.UUID,
+    body: ReportPostRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """File a report against a post for the admin queue. For anonymous posts
+    reported_user_id stays NULL — the report never links the post to its
+    author (the anonymous_post_authors compartment stays sealed). The only
+    authorship lookup below compares against *yourself*, an audited exception
+    like the is_own flag."""
+    post = (
+        await db.execute(
+            select(Post).where(Post.id == post_id, Post.is_deleted == False)  # noqa: E712
+        )
+    ).scalar_one_or_none()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found.")
+
+    if post.author_id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot report your own post.")
+    if post.author_id is None:
+        own_anon = (await db.execute(
+            select(AnonymousPostAuthor.post_id).where(
+                AnonymousPostAuthor.post_id == post.id,
+                AnonymousPostAuthor.user_id == current_user.id,
+            )
+        )).scalar_one_or_none()
+        if own_anon is not None:
+            raise HTTPException(status_code=400, detail="You cannot report your own post.")
+
+    already = (await db.execute(
+        select(Report.id).where(
+            Report.reporter_id == current_user.id,
+            Report.reported_post_id == post.id,
+            Report.status == "pending",
+        )
+    )).scalar_one_or_none()
+    if already is not None:
+        raise HTTPException(status_code=400, detail="You already reported this post.")
+
+    db.add(Report(
+        reporter_id=current_user.id,
+        reported_user_id=post.author_id,
+        reported_post_id=post.id,
+        reason=body.reason.strip(),
+    ))
+    await db.commit()
+    return {"ok": True}

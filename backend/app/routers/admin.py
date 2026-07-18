@@ -192,10 +192,13 @@ async def list_reports(
 ):
     Reporter = aliased(User)
     Reported = aliased(User)
+    # Outer joins: post reports may have no reported user (anonymous posts
+    # stay unlinked from their author — even here).
     rows = (await db.execute(
-        select(Report, Reporter, Reported)
+        select(Report, Reporter, Reported, Post)
         .join(Reporter, Reporter.id == Report.reporter_id)
-        .join(Reported, Reported.id == Report.reported_user_id)
+        .outerjoin(Reported, Reported.id == Report.reported_user_id)
+        .outerjoin(Post, Post.id == Report.reported_post_id)
         .where(Report.status == status)
         .order_by(Report.created_at.desc())
         .limit(100)
@@ -203,14 +206,19 @@ async def list_reports(
     return [
         {
             "id": str(r.id),
+            "type": "post" if r.reported_post_id else "user",
             "reporter": reporter.username,
-            "reported_user": reported.username,
-            "reported_display_name": reported.display_name,
+            "reported_user": reported.username if reported else None,
+            "reported_display_name": reported.display_name if reported else None,
+            "post_id": str(post.id) if post else None,
+            "post_type": post.post_type if post else None,
+            "post_snippet": (post.content or "")[:200] if post else None,
+            "post_deleted": post.is_deleted if post else None,
             "reason": r.reason,
             "status": r.status,
             "created_at": r.created_at.isoformat(),
         }
-        for r, reporter, reported in rows
+        for r, reporter, reported, post in rows
     ]
 
 

@@ -18,6 +18,7 @@ import {
 import { apiFetch } from "@/lib/api";
 import { applyVote } from "@/lib/vote";
 import BookmarkButton from "@/components/BookmarkButton";
+import PostMenu from "@/components/PostMenu";
 import { InlineComposer } from "@/components/InlineComposer";
 import { SearchOverlay } from "@/components/SearchOverlay";
 import { SkeletonPostList } from "@/components/Skeleton";
@@ -420,6 +421,7 @@ export default function QAPage() {
                       {post.faculty_tag}
                     </span>
                   )}
+                  {!post.is_own && <PostMenu postId={post.id} />}
                 </div>
 
                 {/* Images */}

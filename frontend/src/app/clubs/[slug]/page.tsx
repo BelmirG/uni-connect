@@ -16,6 +16,7 @@ import UserSearchInput from "@/components/UserSearchInput";
 import PollComposer, { PollDraft } from "@/components/PollComposer";
 import PollDisplay from "@/components/PollDisplay";
 import MiniAvatar from "@/components/MiniAvatar";
+import PostMenu from "@/components/PostMenu";
 import { timeAgo } from "@/lib/timeAgo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -741,6 +742,9 @@ export default function ClubDetailPage() {
                     )}
                     {" · "}{timeAgo(post.created_at)}
                   </div>
+                  {post.author?.username !== currentUsername && (
+                    <PostMenu postId={post.id} className="ml-auto" />
+                  )}
                 </div>
 
                 {/* Images */}

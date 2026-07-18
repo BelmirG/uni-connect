@@ -26,6 +26,7 @@ import { FileUploader, FileAttachment } from "@/components/FileUploader";
 import { FileAttachmentList } from "@/components/FileAttachmentList";
 import MiniAvatar from "@/components/MiniAvatar";
 import BookmarkButton from "@/components/BookmarkButton";
+import PostMenu from "@/components/PostMenu";
 import MentionSuggestions from "@/components/MentionSuggestions";
 import PollComposer, { PollDraft } from "@/components/PollComposer";
 import PollDisplay from "@/components/PollDisplay";
@@ -654,6 +655,7 @@ function PostCard({
             )}
           </p>
         </div>
+        {!isOwn && <PostMenu postId={post.id} />}
       </div>
 
       {/* Content — swaps to an inline editor for the author */}

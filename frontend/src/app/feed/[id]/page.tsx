@@ -25,6 +25,7 @@ import { FileAttachmentList } from "@/components/FileAttachmentList";
 import type { FileAttachment } from "@/components/FileUploader";
 import MiniAvatar from "@/components/MiniAvatar";
 import BookmarkButton from "@/components/BookmarkButton";
+import PostMenu from "@/components/PostMenu";
 import MentionSuggestions from "@/components/MentionSuggestions";
 import { Linkify } from "@/lib/linkify";
 import { timeAgo } from "@/lib/timeAgo";
@@ -236,6 +237,7 @@ function CommentNode({ node, depth }: { node: TreeNode; depth: number }) {
                 <span> · {timeAgo(p.created_at)}</span>
                 {p.edited_at && <span className="italic"> · edited</span>}
               </div>
+              {!isOwn && <PostMenu postId={p.id} className="ml-auto" />}
             </div>
 
             {/* Comment images */}
@@ -637,6 +639,7 @@ export default function PostDetailPage() {
                     {post.faculty_tag}
                   </span>
                 )}
+                {!isOwnPost && <PostMenu postId={post.id} />}
               </div>
 
               {/* Post images */}

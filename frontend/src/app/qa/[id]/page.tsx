@@ -20,6 +20,7 @@ import { clearQACache } from "@/lib/qaCache";
 import { applyVote } from "@/lib/vote";
 import { AttachBar } from "@/components/AttachBar";
 import BookmarkButton from "@/components/BookmarkButton";
+import PostMenu from "@/components/PostMenu";
 import { ImageGrid } from "@/components/ImageGrid";
 import { FileAttachmentList } from "@/components/FileAttachmentList";
 import type { FileAttachment } from "@/components/FileUploader";
@@ -184,6 +185,7 @@ function AnswerNode({ node, depth }: { node: TreeNode; depth: number }) {
                 <span className="font-medium text-foreground">Anonymous</span>
                 {" · "}{timeAgo(p.created_at)}
               </span>
+              {!p.is_own && <PostMenu postId={p.id} className="ml-auto" />}
             </div>
 
             {/* Images */}
@@ -486,6 +488,7 @@ export default function QADetailPage() {
                 {question.faculty_tag}
               </span>
             )}
+            {!question.is_own && <PostMenu postId={question.id} />}
           </div>
 
           {(question.image_urls ?? []).length > 0 && (

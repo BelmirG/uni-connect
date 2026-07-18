@@ -39,9 +39,14 @@ interface AdminPost {
 
 interface AdminReport {
   id: string;
+  type: "user" | "post";
   reporter: string;
-  reported_user: string;
-  reported_display_name: string;
+  reported_user: string | null;
+  reported_display_name: string | null;
+  post_id: string | null;
+  post_type: string | null;
+  post_snippet: string | null;
+  post_deleted: boolean | null;
   reason: string;
   status: string;
   created_at: string;
@@ -327,6 +332,18 @@ function ReportsTab({ adminKey, flash }: { adminKey: string; flash: (m: string) 
     }
   }
 
+  async function deleteReportedPost(reportId: string, postId: string) {
+    if (!window.confirm("Delete this post? (soft delete — recoverable via DB)")) return;
+    try {
+      await adminReq(adminKey, `/api/admin/posts/${postId}`, { method: "DELETE" });
+      await adminReq(adminKey, `/api/admin/reports/${reportId}/dismiss`, { method: "POST" });
+      flash("Post deleted, report closed");
+      load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed.");
+    }
+  }
+
   if (loading) return <Loading />;
   if (reports.length === 0) return <Empty label="No pending reports. 🎉" />;
 
@@ -339,13 +356,33 @@ function ReportsTab({ adminKey, flash }: { adminKey: string; flash: (m: string) 
             <div className="flex-1 min-w-0">
               <div className="text-sm text-on-surface">
                 <span className="font-semibold">@{r.reporter}</span> reported{" "}
-                <Link href={`/profile/${r.reported_user}`} className="font-semibold text-primary no-underline">@{r.reported_user}</Link>
+                {r.type === "post" ? (
+                  <>
+                    a post
+                    {r.reported_user
+                      ? <> by <Link href={`/profile/${r.reported_user}`} className="font-semibold text-primary no-underline">@{r.reported_user}</Link></>
+                      : <span className="text-on-surface-variant"> (anonymous)</span>}
+                    {r.post_deleted && <span className="text-on-surface-variant italic"> · already deleted</span>}
+                  </>
+                ) : (
+                  <Link href={`/profile/${r.reported_user}`} className="font-semibold text-primary no-underline">@{r.reported_user}</Link>
+                )}
               </div>
+              {r.type === "post" && r.post_snippet && (
+                <p className="text-xs text-on-surface-variant mt-1.5 px-3 py-2 bg-surface-container-low rounded-lg border-l-2 border-outline-variant whitespace-pre-wrap break-words">
+                  {r.post_snippet}
+                </p>
+              )}
               <p className="text-sm text-on-surface-variant mt-1 whitespace-pre-wrap">{r.reason}</p>
             </div>
           </div>
-          <div className="flex gap-2 mt-3">
-            <ActionBtn onClick={() => banReported(r.reported_user)} icon={Ban} label="Ban user" tone="danger" />
+          <div className="flex gap-2 mt-3 flex-wrap">
+            {r.type === "post" && r.post_id && !r.post_deleted && (
+              <ActionBtn onClick={() => deleteReportedPost(r.id, r.post_id!)} icon={Trash2} label="Delete post" tone="danger" />
+            )}
+            {r.reported_user && (
+              <ActionBtn onClick={() => banReported(r.reported_user!)} icon={Ban} label="Ban user" tone="danger" />
+            )}
             <ActionBtn onClick={() => dismiss(r.id)} icon={X} label="Dismiss" tone="neutral" />
           </div>
         </div>
