@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import ThumbImg from "@/components/ThumbImg";
 
 export default function MiniAvatar({
   name,
@@ -17,7 +18,7 @@ export default function MiniAvatar({
 
   if (url)
     return (
-      <img
+      <ThumbImg
         src={url}
         alt=""
         loading="lazy"

@@ -100,6 +100,12 @@ def _is_text(data: bytes) -> bool:
 IMAGE_MAX_DIMENSION = 2560  # px, longest side — plenty for any phone/laptop screen
 JPEG_QUALITY = 88
 
+# Thumbnails: chat bubbles, gallery cells, and avatars render at 40–200 px, so
+# serving the 2560px original there wastes 10–20× the bandwidth. 640px covers
+# every small-render context (still sharp on 2× screens) in one cached file.
+THUMB_MAX_DIMENSION = 640
+THUMB_QUALITY = 80  # WebP — smaller than JPEG at equal quality, keeps alpha
+
 
 def _normalize_jpeg(data: bytes) -> bytes:
     """Re-encode an uploaded JPEG through Pillow.
@@ -126,6 +132,22 @@ def _normalize_jpeg(data: bytes) -> bytes:
             optimize=True,
             icc_profile=img.info.get("icc_profile"),
         )
+        return out.getvalue()
+
+
+def _make_thumbnail(data: bytes) -> bytes:
+    """Downscale an image to a small WebP for chat bubbles/grids/avatars.
+
+    WebP keeps transparency (screenshots, stickers) and compresses better than
+    JPEG. Animated GIFs never reach here — a static thumb would freeze them.
+    """
+    with Image.open(BytesIO(data)) as img:
+        img = ImageOps.exif_transpose(img)
+        if img.mode not in ("RGB", "RGBA", "L"):
+            img = img.convert("RGBA" if "A" in img.mode or "transparency" in img.info else "RGB")
+        img.thumbnail((THUMB_MAX_DIMENSION, THUMB_MAX_DIMENSION))
+        out = BytesIO()
+        img.save(out, format="WEBP", quality=THUMB_QUALITY, method=4)
         return out.getvalue()
 
 
@@ -180,8 +202,20 @@ async def upload_image(
             raise HTTPException(status_code=422, detail="Could not process image.")
 
     ext = IMAGE_EXTENSIONS[file.content_type]
-    filename = f"{uuid.uuid4()}{ext}"
+    stem = str(uuid.uuid4())
+    filename = f"{stem}{ext}"
     (UPLOAD_DIR / filename).write_bytes(data)
+
+    # Companion thumbnail at a fixed derived name ({stem}_t.webp): the frontend
+    # computes the thumb URL from the full URL, and falls back to the original
+    # if the thumb 404s (GIFs, pre-thumbnail uploads). Best-effort — a thumb
+    # failure must never fail the upload itself.
+    if file.content_type != "image/gif":
+        try:
+            thumb = await run_in_threadpool(_make_thumbnail, data)
+            (UPLOAD_DIR / f"{stem}_t.webp").write_bytes(thumb)
+        except Exception:
+            pass
 
     return {"url": f"/uploads/{filename}"}
 

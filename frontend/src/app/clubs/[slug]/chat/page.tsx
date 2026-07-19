@@ -8,6 +8,7 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { openChatSocket, type ChatSocket } from "@/lib/chatSocket";
 import { getClubChatCache, saveClubChatCache } from "@/lib/chatCache";
 import { compressImage } from "@/lib/imageCompress";
+import ThumbImg from "@/components/ThumbImg";
 import {
   ArrowLeft, Send, X, CornerUpLeft, Plus, ImageIcon, FileText,
   Download, ExternalLink, MoreVertical, GalleryHorizontalEnd,
@@ -163,7 +164,7 @@ function MediaSheet({ photos, docs, onPreview }: {
             ? <p className="text-sm text-on-surface-variant text-center py-10">No photos yet.</p>
             : <div className="grid grid-cols-4 sm:grid-cols-6 gap-0.5">
                 {photos.map((a, i) => (
-                  <img key={i} src={a.url} alt={a.name} loading="lazy" decoding="async" onClick={() => onPreview(allPhotoUrls, i)} className="aspect-square object-cover rounded-sm cursor-zoom-in w-full" />
+                  <ThumbImg key={i} src={a.url} alt={a.name} loading="lazy" decoding="async" onClick={() => onPreview(allPhotoUrls, i)} className="aspect-square object-cover rounded-sm cursor-zoom-in w-full" />
                 ))}
               </div>
         )}
@@ -208,7 +209,7 @@ function BubbleAttachments({ attachments, isOwn, onPreview }: {
       {images.length > 0 && (
         <div className={cn("grid gap-1", images.length === 1 ? "grid-cols-1" : "grid-cols-2")}>
           {images.map((a, i) => (
-            <img key={i} src={a.url} alt={a.name} loading="lazy" decoding="async" onClick={() => onPreview(imageUrls, i)} className="rounded-xl object-cover cursor-zoom-in w-full" style={{ maxHeight: 200 }} />
+            <ThumbImg key={i} src={a.url} alt={a.name} loading="lazy" decoding="async" onClick={() => onPreview(imageUrls, i)} className="rounded-xl object-cover cursor-zoom-in w-full" style={{ maxHeight: 200 }} />
           ))}
         </div>
       )}

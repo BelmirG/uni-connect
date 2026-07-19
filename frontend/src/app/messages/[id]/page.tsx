@@ -7,6 +7,7 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { openChatSocket, type ChatSocket } from "@/lib/chatSocket";
 import { getDmCache, saveDmCache } from "@/lib/chatCache";
 import { compressImage } from "@/lib/imageCompress";
+import ThumbImg from "@/components/ThumbImg";
 import { ArrowLeft, Send, MoreVertical, Trash2, X, CornerUpLeft, Plus, ImageIcon, FileText, Download, ExternalLink, GalleryHorizontalEnd, ChevronLeft, ChevronRight, Bell, Check, ListChecks } from "lucide-react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
@@ -101,7 +102,7 @@ function MsgAttachments({ attachments, isOwn, onPreview }: {
       {images.length > 0 && (
         <div className={cn("grid gap-1", images.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
           {images.map((a, i) => (
-            <img
+            <ThumbImg
               key={i}
               src={a.url}
               alt={a.name}
@@ -449,7 +450,7 @@ function MediaSheet({ photos, docs, isPdf, isText, onPreview }: {
             ? <p className="text-sm text-on-surface-variant text-center py-10">No photos yet.</p>
             : <div className="grid grid-cols-4 sm:grid-cols-6 gap-0.5">
                 {photos.map((a, i) => (
-                  <img key={i} src={a.url} alt={a.name} loading="lazy" decoding="async" onClick={() => onPreview(photos.map(p => p.url), i)} className="aspect-square object-cover rounded-sm cursor-zoom-in w-full" />
+                  <ThumbImg key={i} src={a.url} alt={a.name} loading="lazy" decoding="async" onClick={() => onPreview(photos.map(p => p.url), i)} className="aspect-square object-cover rounded-sm cursor-zoom-in w-full" />
                 ))}
               </div>
         )}
