@@ -646,7 +646,7 @@ function PostCard({
       <div className="flex items-start gap-3 px-4 pt-4 pb-3">
         <Link href={`/profile/${post.author?.username}`} className="flex-shrink-0">
           <MiniAvatar
-            name={post.author?.display_name ?? "?"}
+            name={post.author?.username ?? "?"}
             url={post.author?.avatar_url ?? null}
             size={40}
           />
@@ -654,7 +654,7 @@ function PostCard({
         <div className="flex-1 min-w-0">
           <Link href={`/profile/${post.author?.username}`} className="no-underline">
             <span className="font-semibold text-sm text-on-surface leading-tight">
-              {post.author?.display_name ?? "Unknown"}
+              {post.author?.username ?? "Unknown"}
             </span>
           </Link>
           <p className="text-[11px] text-on-surface-variant mt-0.5">

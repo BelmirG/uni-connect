@@ -92,13 +92,13 @@ export default function SavedPostsPage() {
             <Link href={postHref(post)} className="block no-underline">
               <div className="flex items-start gap-3 px-4 pt-4 pb-1">
                 <MiniAvatar
-                  name={post.author?.display_name ?? "Anonymous"}
+                  name={post.author?.username ?? "Anonymous"}
                   url={post.author?.avatar_url ?? null}
                   size={36}
                 />
                 <div className="flex-1 min-w-0">
                   <span className="font-semibold text-sm text-on-surface leading-tight">
-                    {post.author?.display_name ?? "Anonymous"}
+                    {post.author?.username ?? "Anonymous"}
                   </span>
                   <p className="text-[11px] text-on-surface-variant mt-0.5">
                     {timeAgo(post.created_at)}

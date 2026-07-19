@@ -226,13 +226,11 @@ function CommentNode({ node, depth }: { node: TreeNode; depth: number }) {
             {/* Comment header */}
             <div className="flex items-center gap-2 mb-1">
               <Link href={`/profile/${p.author?.username}`} className="flex-shrink-0">
-                <MiniAvatar name={p.author?.display_name ?? "?"} url={p.author?.avatar_url ?? null} size={26} />
+                <MiniAvatar name={p.author?.username ?? "?"} url={p.author?.avatar_url ?? null} size={26} />
               </Link>
               <div className="text-xs text-muted-foreground">
                 <Link href={`/profile/${p.author?.username}`} className="no-underline hover:underline">
-                  <span className="font-semibold text-foreground">{p.author?.display_name ?? "Unknown"}</span>
-                  {" "}
-                  <span>@{p.author?.username ?? "?"}</span>
+                  <span className="font-semibold text-foreground">{p.author?.username ?? "Unknown"}</span>
                 </Link>
                 <span> · {timeAgo(p.created_at)}</span>
                 {p.edited_at && <span className="italic"> · edited</span>}
@@ -345,7 +343,7 @@ function CommentNode({ node, depth }: { node: TreeNode; depth: number }) {
                 onChange={(e) => { ctx.onSetContent(e.target.value); setReplyCaret(e.target.selectionStart); }}
                 onKeyUp={(e) => setReplyCaret(e.currentTarget.selectionStart)}
                 onClick={(e) => setReplyCaret(e.currentTarget.selectionStart)}
-                placeholder={`Reply to ${p.author?.display_name ?? "comment"}…`}
+                placeholder={`Reply to ${p.author?.username ?? "comment"}…`}
                 rows={2}
                 autoFocus
                 className="w-full resize-none text-sm px-3 py-2 border border-input rounded-xl bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -620,15 +618,12 @@ export default function PostDetailPage() {
               {/* Post header */}
               <div className="flex items-center gap-3 px-4 pt-4 pb-3">
                 <Link href={`/profile/${post.author?.username}`} className="flex-shrink-0">
-                  <MiniAvatar name={post.author?.display_name ?? "?"} url={post.author?.avatar_url ?? null} size={40} />
+                  <MiniAvatar name={post.author?.username ?? "?"} url={post.author?.avatar_url ?? null} size={40} />
                 </Link>
                 <div className="flex-1 min-w-0">
                   <Link href={`/profile/${post.author?.username}`} className="no-underline hover:underline">
                     <span className="font-semibold text-sm text-foreground">
-                      {post.author?.display_name ?? "Unknown"}
-                    </span>{" "}
-                    <span className="text-muted-foreground text-xs">
-                      @{post.author?.username ?? "?"}
+                      {post.author?.username ?? "Unknown"}
                     </span>
                   </Link>
                   <span className="text-muted-foreground text-xs"> · {timeAgo(post.created_at)}</span>

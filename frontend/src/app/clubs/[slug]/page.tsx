@@ -723,7 +723,7 @@ export default function ClubDetailPage() {
                 <div className="flex items-center gap-2.5 px-4 pt-3 pb-2">
                   {post.author ? (
                     <Link href={`/profile/${post.author.username}`} className="flex-shrink-0">
-                      <MiniAvatar name={post.author.display_name} url={post.author.avatar_url} />
+                      <MiniAvatar name={post.author.username} url={post.author.avatar_url} />
                     </Link>
                   ) : (
                     <MiniAvatar name="?" url={null} />
@@ -734,8 +734,7 @@ export default function ClubDetailPage() {
                         href={`/profile/${post.author.username}`}
                         className="no-underline text-on-surface-variant"
                       >
-                        <strong className="text-on-surface">{post.author.display_name}</strong>
-                        {" @"}{post.author.username}
+                        <strong className="text-on-surface">{post.author.username}</strong>
                       </Link>
                     ) : (
                       <em>Unknown</em>
