@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.blocks import blocked_user_ids, is_blocked_pair
 from app.core.notify import push_live
 from app.core.redis import redis
 from app.core.security import decode_access_token
@@ -117,13 +118,18 @@ async def search_users(
     if not q.strip():
         return []
     pattern = f"%{q.strip()}%"
+    where = [
+        User.id != current_user.id,
+        User.is_active == True,
+        or_(User.username.ilike(pattern), User.display_name.ilike(pattern)),
+    ]
+    hidden = await blocked_user_ids(db, current_user.id)
+    if hidden:
+        where.append(User.id.notin_(hidden))
+
     rows = (await db.execute(
         select(User.username, User.display_name, User.avatar_url)
-        .where(
-            User.id != current_user.id,
-            User.is_active == True,
-            or_(User.username.ilike(pattern), User.display_name.ilike(pattern)),
-        )
+        .where(*where)
         .limit(10)
     )).all()
     return [
@@ -176,6 +182,11 @@ async def list_conversations(
         else_=Conversation.user1_id,
     )
 
+    # A blocked person's thread disappears from the list for both sides. The
+    # messages are kept, not deleted — unblocking brings the thread back.
+    hidden = await blocked_user_ids(db, current_user.id)
+    hidden_clause = [OtherUser.id.notin_(hidden)] if hidden else []
+
     rows = (await db.execute(
         select(
             Conversation.id,
@@ -197,7 +208,8 @@ async def list_conversations(
             or_(
                 Conversation.user1_id == current_user.id,
                 Conversation.user2_id == current_user.id,
-            )
+            ),
+            *hidden_clause,
         )
         .order_by(last_msg.c.created_at.desc().nulls_last())
     )).all()
@@ -303,6 +315,9 @@ async def open_conversation(
         raise HTTPException(status_code=404, detail="User not found.")
     if other.id == current_user.id:
         raise HTTPException(status_code=400, detail="You cannot message yourself.")
+    if await is_blocked_pair(db, current_user.id, other.id):
+        # Same 404 as a nonexistent user: the blocked side is never told why.
+        raise HTTPException(status_code=404, detail="User not found.")
 
     conv = await _get_or_create_conversation(current_user, other, db)
     return {
@@ -330,6 +345,8 @@ async def share_post(
         raise HTTPException(status_code=404, detail="User not found.")
     if other.id == current_user.id:
         raise HTTPException(status_code=400, detail="You cannot message yourself.")
+    if await is_blocked_pair(db, current_user.id, other.id):
+        raise HTTPException(status_code=404, detail="User not found.")
 
     try:
         post_id = uuid.UUID(body.post_id)
@@ -495,6 +512,11 @@ async def get_messages(
         raise HTTPException(status_code=403, detail="Access denied.")
 
     other_user_id = conv.user2_id if conv.user1_id == current_user.id else conv.user1_id
+    if await is_blocked_pair(db, current_user.id, other_user_id):
+        # Matches the missing-conversation response, so a saved link to a
+        # blocked thread behaves exactly like one that never existed.
+        raise HTTPException(status_code=403, detail="Access denied.")
+
     other_user = (await db.execute(
         select(User).where(User.id == other_user_id)
     )).scalar_one()
@@ -664,6 +686,14 @@ async def dm_websocket(websocket: WebSocket, conversation_id: str):
             select(Conversation).where(Conversation.id == conv_id)
         )).scalar_one_or_none()
         if not conv or (conv.user1_id != user.id and conv.user2_id != user.id):
+            await websocket.close(code=4003, reason="Access denied")
+            return
+
+        # Refuse the socket outright if either side blocked the other — this is
+        # the only thing standing between a blocked user and sending a DM, since
+        # every message goes over this channel rather than a REST endpoint.
+        other_id = conv.user2_id if conv.user1_id == user.id else conv.user1_id
+        if await is_blocked_pair(db, user.id, other_id):
             await websocket.close(code=4003, reason="Access denied")
             return
 

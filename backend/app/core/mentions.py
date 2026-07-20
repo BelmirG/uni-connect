@@ -9,6 +9,7 @@ import re
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.blocks import blocked_user_ids
 from app.core.notify import push_live
 from app.models.notification import Notification
 from app.models.user import User
@@ -35,6 +36,12 @@ async def notify_post_mentions(content: str, post, actor: User, db: AsyncSession
     users = (await db.execute(
         select(User).where(func.lower(User.username).in_(names), User.id != actor.id)
     )).scalars().all()
+
+    # Mentions write their own notification rows rather than going through
+    # notify(), so the block check has to be repeated here: typing @someone who
+    # blocked you must not reach them.
+    hidden = await blocked_user_ids(db, actor.id)
+    users = [u for u in users if u.id not in hidden]
     if not users:
         return
 

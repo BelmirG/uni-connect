@@ -9,6 +9,7 @@ from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.blocks import blocked_user_ids, is_blocked_pair, visible_author_clause
 from app.core.notify import notify, push_live
 from app.core.redis import redis
 from app.database import get_db
@@ -29,7 +30,7 @@ from app.schemas.post import (
     VoteRequest,
     VoteResponse,
 )
-from app.routers.posts import _create_poll_options, _load_polls
+from app.routers.posts import _create_poll_options, _load_events, _load_polls
 
 router = APIRouter(prefix="/api/clubs", tags=["clubs"])
 
@@ -92,7 +93,7 @@ async def _user_votes(
     return {row.post_id: row.vote_type for row in result}
 
 
-def _row_to_post(row, current_vote: str | None, poll=None) -> PostResponse:
+def _row_to_post(row, current_vote: str | None, poll=None, event=None) -> PostResponse:
     post, username, display_name, avatar_url, upvotes, downvotes, reply_count, *_ = row
     return PostResponse(
         id=post.id,
@@ -106,6 +107,7 @@ def _row_to_post(row, current_vote: str | None, poll=None) -> PostResponse:
         current_user_vote=current_vote,
         reply_count=reply_count or 0,
         poll=poll,
+        event=event,
         created_at=post.created_at,
         is_deleted=post.is_deleted,
         is_pinned=post.is_pinned,
@@ -443,11 +445,18 @@ async def get_club_posts(
         if not membership:
             raise HTTPException(status_code=403, detail="This is a private club.")
 
+    # Blocked members stay in the club (membership is the club's business, not
+    # yours), but their posts drop out of your view of its feed. Club *chat* is
+    # deliberately left alone — hiding messages mid-conversation reads as broken.
+    block_clause = visible_author_clause(
+        Post.author_id, await blocked_user_ids(db, current_user.id)
+    )
     where = and_(
         Post.post_type == "club",
         Post.club_id == club.id,
         Post.parent_post_id.is_(None),
         Post.is_deleted == False,
+        *([block_clause] if block_clause is not None else []),
     )
     rows = (
         await db.execute(
@@ -462,9 +471,13 @@ async def get_club_posts(
     post_ids = [r[0].id for r in rows]
     votes = await _user_votes(post_ids, current_user.id, db)
     polls = await _load_polls(post_ids, current_user.id, db)
+    events = await _load_events(post_ids, current_user.id, db)
 
     return PostListResponse(
-        posts=[_row_to_post(r, votes.get(r[0].id), polls.get(r[0].id)) for r in rows],
+        posts=[
+            _row_to_post(r, votes.get(r[0].id), polls.get(r[0].id), events.get(r[0].id))
+            for r in rows
+        ],
         total=total,
     )
 
@@ -492,6 +505,10 @@ async def create_club_post(
         # Club-only feature: the flag is deliberately not honored by the feed
         # post endpoint, so feed polls are always anonymous.
         poll_public_votes=bool(body.poll_options) and body.poll_public_votes,
+        # Events are club-only too: the feed endpoint ignores these fields.
+        event_starts_at=body.event_starts_at,
+        event_ends_at=body.event_ends_at,
+        event_location=(body.event_location or "").strip() or None,
     )
     db.add(post)
     await db.flush()
@@ -505,6 +522,8 @@ async def create_club_post(
 
     await db.commit()
     await db.refresh(post)
+
+    event = (await _load_events([post.id], current_user.id, db)).get(post.id)
 
     return PostResponse(
         id=post.id,
@@ -522,6 +541,7 @@ async def create_club_post(
         current_user_vote=None,
         reply_count=0,
         poll=poll,
+        event=event,
         created_at=post.created_at,
         is_deleted=False,
         is_pinned=False,
@@ -691,6 +711,10 @@ async def invite_member(
         raise HTTPException(status_code=404, detail="User not found.")
     if target.id == current_user.id:
         raise HTTPException(status_code=400, detail="You cannot invite yourself.")
+    if await is_blocked_pair(db, current_user.id, target.id):
+        # An invitation is a personal, notifying approach — the same 404 the
+        # rest of the app gives, so the block stays invisible to both sides.
+        raise HTTPException(status_code=404, detail="User not found.")
 
     if await _get_membership(club.id, target.id, db):
         raise HTTPException(status_code=409, detail="That user is already a member.")

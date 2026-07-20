@@ -85,7 +85,17 @@ async def notify(
     toast just gets type="milestone" with count in `extra`).
     Never notify someone about their own action — callers check that, since
     only they know which ids are 'self' in their context.
+
+    Blocked pairs never notify each other. This is the single choke point for
+    every actor-driven notification (replies, follows, club events), so a new
+    notification type is block-safe by default. Actorless/system notifications
+    have nobody to check and always go through.
     """
+    if actor is not None:
+        from app.core.blocks import is_blocked_pair
+        if await is_blocked_pair(db, user_id, actor.id):
+            return
+
     db.add(Notification(
         user_id=user_id,
         actor_id=actor.id if actor else None,

@@ -7,6 +7,7 @@ from sqlalchemy import and_, case, func, literal, literal_column, or_, select, t
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.blocks import blocked_user_ids, is_blocked_pair, visible_author_clause
 from app.core.mentions import extract_mention_usernames, notify_post_mentions
 from app.core.notify import notify
 from app.database import get_db
@@ -16,6 +17,7 @@ from app.models.bookmark import Bookmark
 from app.models.club import Club
 from app.models.club_member import ClubMember
 from app.models.direct_message import DirectMessage
+from app.models.event import EventRSVP
 from app.models.follow import Follow
 from app.models.poll import PollOption, PollVote
 from app.models.post import Post
@@ -26,10 +28,12 @@ from app.schemas.post import (
     AuthorInfo,
     CreatePostRequest,
     EditPostRequest,
+    EventResponse,
     PollOptionResponse,
     PollResponse,
     PollVoteRequest,
     PostListResponse,
+    RSVPRequest,
     PostResponse,
     VoteRequest,
     VoteResponse,
@@ -115,6 +119,21 @@ async def _guard_private_club_post(post: Post, user_id: uuid.UUID, db: AsyncSess
         )
     )).scalar_one_or_none()
     if member is None:
+        raise HTTPException(status_code=404, detail="Post not found.")
+
+
+async def _guard_blocked_post(post: Post, user_id: uuid.UUID, db: AsyncSession) -> None:
+    """Refuse to act on a post whose author is blocked in either direction.
+
+    Covers reply and vote, which are reachable by post id alone. 404 matches
+    what the read endpoint already returns, so the response never reveals that
+    a block (rather than a deletion) is the reason. Anonymous posts have a NULL
+    author and are always allowed through — identity isn't on display there, so
+    there's nothing for a block to act on.
+    """
+    if post.author_id is None or post.author_id == user_id:
+        return
+    if await is_blocked_pair(db, user_id, post.author_id):
         raise HTTPException(status_code=404, detail="Post not found.")
 
 
@@ -214,8 +233,69 @@ async def _load_polls(
     return result
 
 
+async def _load_events(
+    post_ids: list[uuid.UUID], user_id: uuid.UUID, db: AsyncSession
+) -> dict[uuid.UUID, EventResponse]:
+    """RSVP counts + the caller's own answer, for whichever of these posts are
+    events. Two batched queries, same shape as _load_polls — never per-post."""
+    if not post_ids:
+        return {}
+
+    events = (await db.execute(
+        select(Post.id, Post.event_starts_at, Post.event_ends_at, Post.event_location)
+        .where(Post.id.in_(post_ids), Post.event_starts_at.isnot(None))
+    )).all()
+    if not events:
+        return {}
+
+    event_ids = [row.id for row in events]
+
+    counts: dict[uuid.UUID, dict[str, int]] = {}
+    for row in (await db.execute(
+        select(EventRSVP.post_id, EventRSVP.status, func.count().label("cnt"))
+        .where(EventRSVP.post_id.in_(event_ids))
+        .group_by(EventRSVP.post_id, EventRSVP.status)
+    )).all():
+        counts.setdefault(row.post_id, {})[row.status] = row.cnt
+
+    mine = {
+        row.post_id: row.status
+        for row in (await db.execute(
+            select(EventRSVP.post_id, EventRSVP.status)
+            .where(EventRSVP.post_id.in_(event_ids), EventRSVP.user_id == user_id)
+        )).all()
+    }
+
+    now = datetime.now(timezone.utc)
+    result: dict[uuid.UUID, EventResponse] = {}
+    for row in events:
+        starts_at = row.event_starts_at
+        if starts_at.tzinfo is None:
+            starts_at = starts_at.replace(tzinfo=timezone.utc)
+        # "Past" keys off the end when there is one, so an event that runs for
+        # three hours doesn't read as over the minute it begins.
+        ends_at = row.event_ends_at
+        if ends_at is not None and ends_at.tzinfo is None:
+            ends_at = ends_at.replace(tzinfo=timezone.utc)
+        by_status = counts.get(row.id, {})
+        result[row.id] = EventResponse(
+            starts_at=starts_at,
+            ends_at=ends_at,
+            location=row.event_location,
+            going_count=by_status.get("going", 0),
+            interested_count=by_status.get("interested", 0),
+            user_status=mine.get(row.id),
+            is_past=now > (ends_at or starts_at),
+        )
+    return result
+
+
 def _row_to_response(
-    row, current_vote: str | None, poll: PollResponse | None = None, is_bookmarked: bool = False
+    row,
+    current_vote: str | None,
+    poll: PollResponse | None = None,
+    is_bookmarked: bool = False,
+    event: EventResponse | None = None,
 ) -> PostResponse:
     post, username, display_name, avatar_url, upvotes, downvotes, reply_count, share_count, *_ = row
     return PostResponse(
@@ -232,6 +312,7 @@ def _row_to_response(
         reply_count=reply_count or 0,
         share_count=share_count or 0,
         poll=poll,
+        event=event,
         created_at=post.created_at,
         edited_at=post.edited_at,
         is_deleted=post.is_deleted,
@@ -340,11 +421,18 @@ async def list_posts(
     if faculty and faculty not in FACULTIES:
         raise HTTPException(status_code=422, detail="Invalid faculty tag.")
 
+    # Posts by (and for) blocked users drop out of the feed in both directions.
+    # Anonymous posts have a NULL author and are never affected — see
+    # app/core/blocks.py for why that matters.
+    hidden = await blocked_user_ids(db, current_user.id)
+    block_clause = visible_author_clause(Post.author_id, hidden)
+
     base_conditions = [
         Post.post_type == "feed",
         Post.parent_post_id.is_(None),
         Post.is_deleted == False,
         *([ Post.faculty_tag == faculty ] if faculty else []),
+        *([block_clause] if block_clause is not None else []),
     ]
 
     if feed == "friends":
@@ -402,11 +490,15 @@ async def search_posts(
     if not q:
         return PostListResponse(posts=[], total=0)
 
+    block_clause = visible_author_clause(
+        Post.author_id, await blocked_user_ids(db, current_user.id)
+    )
     where = and_(
         Post.post_type == post_type,
         Post.parent_post_id.is_(None),
         Post.is_deleted == False,
         Post.content.ilike(f"%{q}%"),
+        *([block_clause] if block_clause is not None else []),
     )
     rows = (
         await db.execute(
@@ -449,12 +541,16 @@ async def list_saved_posts(
         .where(ClubMember.club_id == Post.club_id, ClubMember.user_id == current_user.id)
         .exists(),
     )
-    where = and_(Post.id == saved_order.c.post_id, Post.is_deleted == False, still_visible)
+    block_clause = visible_author_clause(
+        Post.author_id, await blocked_user_ids(db, current_user.id)
+    )
+    extra = [block_clause] if block_clause is not None else []
+    where = and_(Post.id == saved_order.c.post_id, Post.is_deleted == False, still_visible, *extra)
 
     total = (await db.execute(
         select(func.count()).select_from(
             select(Post.id).join(saved_order, Post.id == saved_order.c.post_id)
-            .where(Post.is_deleted == False, still_visible).subquery()
+            .where(Post.is_deleted == False, still_visible, *extra).subquery()
         )
     )).scalar() or 0
 
@@ -489,10 +585,19 @@ async def get_post(
 
     await _guard_private_club_post(row[0], current_user.id, db)
 
+    # A blocked author's post is a 404 even by direct link, and their replies
+    # drop out of the thread. NULL (anonymous) authors are never hidden.
+    hidden = await blocked_user_ids(db, current_user.id)
+    if row[0].author_id is not None and row[0].author_id in hidden:
+        raise HTTPException(status_code=404, detail="Post not found.")
+
     vote_map = await _user_votes([post_id], current_user.id, db)
     poll_map = await _load_polls([post_id], current_user.id, db)
     saved_map = await _user_bookmarks([post_id], current_user.id, db)
-    post_response = _row_to_response(row, vote_map.get(post_id), poll_map.get(post_id), post_id in saved_map)
+    event_map = await _load_events([post_id], current_user.id, db)
+    post_response = _row_to_response(
+        row, vote_map.get(post_id), poll_map.get(post_id), post_id in saved_map, event_map.get(post_id)
+    )
 
     MAX_DEPTH = 6
     seed = select(Post.id.label("id"), literal(0).label("depth")).where(Post.parent_post_id == post_id)
@@ -504,9 +609,14 @@ async def get_post(
     )
     cte = cte.union_all(step)
 
+    reply_block_clause = visible_author_clause(Post.author_id, hidden)
+    reply_where = Post.id.in_(select(cte.c.id))
+    if reply_block_clause is not None:
+        reply_where = and_(reply_where, reply_block_clause)
+
     reply_rows = (
         await db.execute(
-            _build_post_select(Post.id.in_(select(cte.c.id)))
+            _build_post_select(reply_where)
             .order_by(Post.created_at.asc())
         )
     ).all()
@@ -535,6 +645,7 @@ async def create_reply(
         raise HTTPException(status_code=404, detail="Post not found.")
 
     await _guard_private_club_post(parent, current_user.id, db)
+    await _guard_blocked_post(parent, current_user.id, db)
 
     reply = Post(
         author_id=current_user.id,
@@ -614,6 +725,7 @@ async def vote_post(
     if not post:
         raise HTTPException(status_code=404, detail="Post not found.")
     await _guard_private_club_post(post, current_user.id, db)
+    await _guard_blocked_post(post, current_user.id, db)
 
     existing = (
         await db.execute(
@@ -709,6 +821,47 @@ async def poll_vote(
 
     polls = await _load_polls([post_id], current_user.id, db)
     return polls.get(post_id)
+
+
+@router.post("/{post_id}/rsvp", response_model=EventResponse)
+async def rsvp_event(
+    post_id: uuid.UUID,
+    body: RSVPRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Answer a club event, or withdraw by sending your current status again.
+
+    Membership is what grants access, so the private-club guard is the same one
+    reading the post uses. Past events stay answerable — a headcount is often
+    corrected right after the fact, and refusing would just lose data.
+    """
+    post = (await db.execute(
+        select(Post).where(Post.id == post_id, Post.is_deleted == False)
+    )).scalar_one_or_none()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found.")
+    if post.event_starts_at is None:
+        raise HTTPException(status_code=400, detail="This post is not an event.")
+    await _guard_private_club_post(post, current_user.id, db)
+    await _guard_blocked_post(post, current_user.id, db)
+
+    existing = (await db.execute(
+        select(EventRSVP).where(
+            EventRSVP.post_id == post_id, EventRSVP.user_id == current_user.id
+        )
+    )).scalar_one_or_none()
+
+    if existing is None:
+        db.add(EventRSVP(post_id=post_id, user_id=current_user.id, status=body.status))
+    elif existing.status == body.status:
+        await db.delete(existing)  # tapping "Going" again withdraws it
+    else:
+        existing.status = body.status
+
+    await db.commit()
+    events = await _load_events([post_id], current_user.id, db)
+    return events[post_id]
 
 
 @router.get("/{post_id}/poll-voters")

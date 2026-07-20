@@ -23,16 +23,27 @@ class CreatePostRequest(BaseModel):
     poll_expires_at: Optional[datetime] = None
     # Honored only by the club post endpoint — feed polls are always anonymous.
     poll_public_votes: bool = False
+    # Event details, also club-only. A start time is what makes a post an event.
+    event_starts_at: Optional[datetime] = None
+    event_ends_at: Optional[datetime] = None
+    event_location: Optional[str] = Field(default=None, max_length=200)
 
     @model_validator(mode='after')
     def validate_post(self) -> 'CreatePostRequest':
-        if not self.content.strip() and not self.image_urls and not self.poll_options and not self.file_attachments:
-            raise ValueError('Post must have text, image, file, or poll.')
+        has_event = self.event_starts_at is not None
+        if not self.content.strip() and not self.image_urls and not self.poll_options and not self.file_attachments and not has_event:
+            raise ValueError('Post must have text, image, file, poll, or event.')
         if self.poll_options:
             if len(self.poll_options) < 2 or len(self.poll_options) > 4:
                 raise ValueError('Poll must have 2 to 4 options.')
             if any(not o.strip() for o in self.poll_options):
                 raise ValueError('Poll options cannot be empty.')
+        # An end or a location without a start would render as an event with no
+        # date — reject it at the edge rather than storing a half-event.
+        if not has_event and (self.event_ends_at or self.event_location):
+            raise ValueError('An event needs a start time.')
+        if has_event and self.event_ends_at and self.event_ends_at <= self.event_starts_at:
+            raise ValueError('Event must end after it starts.')
         return self
 
 
@@ -75,6 +86,22 @@ class PollResponse(BaseModel):
     public_votes: bool = False
 
 
+class EventResponse(BaseModel):
+    starts_at: datetime
+    ends_at: Optional[datetime] = None
+    location: Optional[str] = None
+    going_count: int = 0
+    interested_count: int = 0
+    # The current user's own answer, or None if they haven't responded.
+    user_status: Optional[str] = None
+    is_past: bool = False
+
+
+class RSVPRequest(BaseModel):
+    # Sending your current status again clears it (the "un-RSVP" gesture).
+    status: Literal['going', 'interested']
+
+
 class PostResponse(BaseModel):
     id: uuid.UUID
     content: str
@@ -89,6 +116,7 @@ class PostResponse(BaseModel):
     reply_count: int
     share_count: int = 0
     poll: Optional[PollResponse] = None
+    event: Optional[EventResponse] = None
     created_at: datetime
     edited_at: Optional[datetime] = None
     is_deleted: bool

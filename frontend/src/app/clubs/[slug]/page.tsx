@@ -15,6 +15,8 @@ import { FileAttachmentList } from "@/components/FileAttachmentList";
 import UserSearchInput from "@/components/UserSearchInput";
 import PollComposer, { PollDraft } from "@/components/PollComposer";
 import PollDisplay from "@/components/PollDisplay";
+import EventComposer, { EventDraft } from "@/components/EventComposer";
+import EventDisplay, { EventInfo } from "@/components/EventDisplay";
 import MiniAvatar from "@/components/MiniAvatar";
 import PostMenu from "@/components/PostMenu";
 import { timeAgo } from "@/lib/timeAgo";
@@ -79,6 +81,7 @@ interface Post {
   current_user_vote: "up" | "down" | null;
   reply_count: number;
   poll: Poll | null;
+  event: EventInfo | null;
   created_at: string;
   is_deleted: boolean;
   is_pinned: boolean;
@@ -134,6 +137,7 @@ export default function ClubDetailPage() {
   const [postError, setPostError] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [pollDraft, setPollDraft] = useState<PollDraft | null>(null);
+  const [eventDraft, setEventDraft] = useState<EventDraft | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [memberSearch, setMemberSearch] = useState("");
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -308,12 +312,22 @@ export default function ClubDetailPage() {
 
   async function handlePost(e: React.FormEvent) {
     e.preventDefault();
-    if (!content.trim() && !imageUrls.length && !pollDraft && !fileAttachments.length) return;
+    if (!content.trim() && !imageUrls.length && !pollDraft && !eventDraft && !fileAttachments.length) return;
     if (imagesUploading || filesUploading) return;
     if (pollDraft) {
       const validOptions = pollDraft.options.map((o) => o.trim()).filter(Boolean);
       if (validOptions.length < 2) {
         setPostError("A poll needs at least 2 options.");
+        return;
+      }
+    }
+    if (eventDraft) {
+      if (!eventDraft.startsAt) {
+        setPostError("An event needs a start time.");
+        return;
+      }
+      if (eventDraft.endsAt && new Date(eventDraft.endsAt) <= new Date(eventDraft.startsAt)) {
+        setPostError("An event must end after it starts.");
         return;
       }
     }
@@ -329,6 +343,9 @@ export default function ClubDetailPage() {
           poll_options: pollDraft ? pollDraft.options.map((o) => o.trim()).filter(Boolean) : [],
           poll_expires_at: pollDraft?.expiresAt ? new Date(pollDraft.expiresAt).toISOString() : null,
           poll_public_votes: pollDraft?.publicVotes ?? false,
+          event_starts_at: eventDraft?.startsAt ? new Date(eventDraft.startsAt).toISOString() : null,
+          event_ends_at: eventDraft?.endsAt ? new Date(eventDraft.endsAt).toISOString() : null,
+          event_location: eventDraft?.location.trim() || null,
         }),
       });
       setPosts((prev) => [newPost, ...prev]);
@@ -338,6 +355,7 @@ export default function ClubDetailPage() {
       setFileAttachments([]);
       setUploaderKey((k) => k + 1);
       setPollDraft(null);
+      setEventDraft(null);
       setComposerOpen(false);
     } catch (err: unknown) {
       setPostError(err instanceof Error ? err.message : "Failed to post.");
@@ -678,6 +696,7 @@ export default function ClubDetailPage() {
                   onChange={(attachments, uploading) => { setFileAttachments(attachments); setFilesUploading(uploading); }}
                 />
                 <PollComposer value={pollDraft} onChange={setPollDraft} allowPublicVotes />
+                <EventComposer value={eventDraft} onChange={setEventDraft} />
                 <div className="flex items-center gap-2">
                   {postError && <p className="text-xs text-destructive">{postError}</p>}
                   <div className="ml-auto flex items-center gap-2">
@@ -685,7 +704,7 @@ export default function ClubDetailPage() {
                     <Button
                       type="submit"
                       size="sm"
-                      disabled={submitting || imagesUploading || filesUploading || (!content.trim() && !imageUrls.length && !pollDraft && !fileAttachments.length)}
+                      disabled={submitting || imagesUploading || filesUploading || (!content.trim() && !imageUrls.length && !pollDraft && !eventDraft && !fileAttachments.length)}
                     >
                       {imagesUploading || filesUploading ? "Uploading…" : submitting ? "Posting…" : "Post"}
                     </Button>
@@ -775,6 +794,18 @@ export default function ClubDetailPage() {
                       poll={post.poll}
                       onUpdate={(p) =>
                         setPosts((prev) => prev.map((x) => x.id === post.id ? { ...x, poll: p } : x))
+                      }
+                    />
+                  </div>
+                )}
+
+                {post.event && (
+                  <div className="px-4 pb-3">
+                    <EventDisplay
+                      postId={post.id}
+                      event={post.event}
+                      onUpdate={(ev) =>
+                        setPosts((prev) => prev.map((x) => x.id === post.id ? { ...x, event: ev } : x))
                       }
                     />
                   </div>

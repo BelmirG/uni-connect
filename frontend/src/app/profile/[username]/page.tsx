@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   Bell, ChevronUp, ChevronDown, MessageCircle, Pencil,
-  LogOut, X, Check, Camera, Lock, Bookmark, Trash2, Settings2,
+  LogOut, X, Check, Camera, Lock, Bookmark, Trash2, Settings2, Ban,
 } from "lucide-react";
 
 // Pop-up preference categories — keys match the backend's NOTIFICATION_CATEGORIES.
@@ -48,7 +48,17 @@ interface Profile {
   following_count: number;
   is_following: boolean;
   is_own_profile: boolean;
+  // True only when *you* blocked them: the profile stays reachable so you can
+  // undo it, but comes back emptied. Someone who blocked you 404s instead.
+  is_blocked: boolean;
   username_changed_at: string | null;
+}
+
+interface BlockedUser {
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+  blocked_at: string;
 }
 
 interface UserClub {
@@ -202,6 +212,11 @@ export default function ProfilePage() {
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [reportDone, setReportDone] = useState(false);
 
+  const [blockConfirm, setBlockConfirm] = useState(false);
+  const [blockBusy, setBlockBusy] = useState(false);
+  const [blockedOpen, setBlockedOpen] = useState(false);
+  const [blockedList, setBlockedList] = useState<BlockedUser[] | null>(null);
+
   const [notifOpen, setNotifOpen] = useState(false);
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [notifPrefs, setNotifPrefs] = useState<Record<string, boolean> | null>(null);
@@ -272,8 +287,11 @@ export default function ProfilePage() {
     }
     Promise.all([
       apiFetch<Profile>(`/api/users/${username}`),
-      apiFetch<Post[]>(`/api/users/${username}/posts`),
-      apiFetch<UserClub[]>(`/api/users/${username}/clubs`),
+      // Posts and clubs 404 for a blocked pair while the profile itself still
+      // loads (so you can unblock from here). Empty is the right fallback —
+      // only a failure on the profile call should bounce you off the page.
+      apiFetch<Post[]>(`/api/users/${username}/posts`).catch(() => [] as Post[]),
+      apiFetch<UserClub[]>(`/api/users/${username}/clubs`).catch(() => [] as UserClub[]),
     ])
       .then(([p, userPosts, userClubs]) => {
         saveProfileCache(username, { profile: p, posts: userPosts, clubs: userClubs });
@@ -514,6 +532,49 @@ export default function ProfilePage() {
     } finally {
       setReportSubmitting(false);
     }
+  }
+
+  async function handleBlock() {
+    if (!profile || blockBusy) return;
+    setBlockBusy(true);
+    try {
+      await apiFetch(`/api/users/${profile.username}/block`, { method: "POST" });
+      clearProfileCache(profile.username);
+      // Blocking severs the follow both ways server-side; mirror that here so
+      // the header doesn't keep claiming you follow someone you just blocked.
+      setProfile((prev) => prev ? { ...prev, is_blocked: true, is_following: false } : prev);
+      setPosts([]);
+      setClubs([]);
+      setBlockConfirm(false);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Could not block this user.");
+    } finally {
+      setBlockBusy(false);
+    }
+  }
+
+  async function handleUnblock(name: string) {
+    if (blockBusy) return;
+    setBlockBusy(true);
+    try {
+      await apiFetch(`/api/users/${name}/block`, { method: "DELETE" });
+      clearProfileCache(name);
+      setBlockedList((prev) => prev?.filter((u) => u.username !== name) ?? null);
+      // Reload so the now-visible posts, clubs, and counts come back.
+      if (profile?.username === name) window.location.reload();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Could not unblock this user.");
+    } finally {
+      setBlockBusy(false);
+    }
+  }
+
+  function openBlockedList() {
+    setBlockedOpen(true);
+    setBlockedList(null);
+    apiFetch<BlockedUser[]>("/api/users/me/blocked")
+      .then(setBlockedList)
+      .catch(() => setBlockedList([]));
   }
 
   if (loading) {
@@ -823,6 +884,13 @@ export default function ProfilePage() {
                   Saved
                 </Link>
                 <button
+                  onClick={openBlockedList}
+                  className="flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-md border border-input bg-background text-foreground hover:bg-muted transition-colors"
+                >
+                  <Ban className="w-3.5 h-3.5" />
+                  Blocked
+                </button>
+                <button
                   onClick={handleLogout}
                   className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors ml-1"
                 >
@@ -830,6 +898,15 @@ export default function ProfilePage() {
                   Log out
                 </button>
               </>
+            ) : profile.is_blocked ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleUnblock(profile.username)}
+                disabled={blockBusy}
+              >
+                {blockBusy ? "…" : "Unblock"}
+              </Button>
             ) : (
               <>
                 <Button
@@ -843,14 +920,24 @@ export default function ProfilePage() {
                 <Button size="sm" variant="outline" onClick={handleMessage}>
                   Message
                 </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => { setReportOpen(true); setReportDone(false); setReportReason(""); }}
-                  className="text-destructive border-destructive/30 hover:bg-destructive/5 ml-auto"
-                >
-                  Report
-                </Button>
+                <div className="flex items-center gap-2 ml-auto">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setBlockConfirm(true)}
+                    className="text-destructive border-destructive/30 hover:bg-destructive/5"
+                  >
+                    Block
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => { setReportOpen(true); setReportDone(false); setReportReason(""); }}
+                    className="text-destructive border-destructive/30 hover:bg-destructive/5"
+                  >
+                    Report
+                  </Button>
+                </div>
               </>
             )}
           </div>
@@ -993,7 +1080,20 @@ export default function ProfilePage() {
           </div>
         )}
 
+        {/* Blocked: the profile stays reachable purely so you can undo it, so
+            everything below the header is replaced by the explanation. */}
+        {profile.is_blocked && (
+          <div className="bg-surface border border-outline-variant rounded-2xl px-5 py-8 text-center">
+            <p className="font-semibold text-foreground mb-1">You blocked @{profile.username}</p>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              You won&apos;t see each other&apos;s posts, and neither of you can message,
+              follow, or reply to the other. They aren&apos;t told about this.
+            </p>
+          </div>
+        )}
+
         {/* Section switcher — Posts / Clubs */}
+        {!profile.is_blocked && (
         <div className="flex gap-1 p-1 bg-surface-container-low border border-outline-variant rounded-full mb-4">
           {([
             ["posts", "Posts", profile.post_count],
@@ -1022,9 +1122,10 @@ export default function ProfilePage() {
             );
           })}
         </div>
+        )}
 
         {/* Posts */}
-        {tab === "posts" && (
+        {!profile.is_blocked && tab === "posts" && (
           posts.length === 0 ? (
             <p className="text-sm text-on-surface-variant text-center py-12">No posts yet.</p>
           ) : (
@@ -1057,7 +1158,7 @@ export default function ProfilePage() {
         )}
 
         {/* Clubs */}
-        {tab === "clubs" && (
+        {!profile.is_blocked && tab === "clubs" && (
           clubs.length === 0 ? (
             <p className="text-sm text-on-surface-variant text-center py-12">Not in any clubs yet.</p>
           ) : (
@@ -1194,6 +1295,74 @@ export default function ProfilePage() {
             <p className="text-white/30 text-center text-xs mt-2">Drag to reposition · pinch or slide to zoom</p>
           </div>
         </div>
+      )}
+
+      {/* ── Block confirmation ─────────────────────────────────────────────── */}
+      {blockConfirm && profile && (
+        <>
+          <div onClick={() => setBlockConfirm(false)} className="fixed inset-0 bg-black/45 backdrop-blur-sm z-[300]" />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(360px,92vw)] bg-surface rounded-2xl shadow-2xl z-[301] p-5">
+            <h3 className="font-bold text-base text-foreground mb-2">Block @{profile.username}?</h3>
+            <ul className="text-sm text-muted-foreground leading-relaxed list-disc pl-4 mb-4 flex flex-col gap-1">
+              <li>Neither of you will see the other&apos;s posts</li>
+              <li>Neither of you can message, follow, reply, or vote</li>
+              <li>You&apos;ll both stop following each other</li>
+              <li>They won&apos;t be told that you blocked them</li>
+            </ul>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setBlockConfirm(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleBlock}
+                disabled={blockBusy}
+                className="bg-destructive text-white hover:bg-destructive/90"
+              >
+                {blockBusy ? "Blocking…" : "Block"}
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Blocked accounts list (own profile) ────────────────────────────── */}
+      {blockedOpen && (
+        <>
+          <div onClick={() => setBlockedOpen(false)} className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200]" />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(360px,92vw)] bg-surface rounded-2xl shadow-2xl z-[201] flex flex-col max-h-[65vh]">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
+              <span className="font-semibold text-sm">Blocked accounts</span>
+              <button onClick={() => setBlockedOpen(false)} className="text-muted-foreground hover:text-foreground p-1 rounded-lg hover:bg-muted transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1">
+              {blockedList === null && <p className="text-muted-foreground text-sm text-center py-6">Loading…</p>}
+              {blockedList?.length === 0 && (
+                <p className="text-muted-foreground text-sm text-center py-6">You haven&apos;t blocked anyone.</p>
+              )}
+              {blockedList?.map((u) => (
+                <div key={u.username} className="flex items-center gap-3 px-4 py-2.5 border-b border-border/50">
+                  <MiniAvatar name={u.username} url={u.avatar_url} size={38} />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-sm text-foreground truncate">@{u.username}</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleUnblock(u.username)}
+                    disabled={blockBusy}
+                    className="flex-shrink-0"
+                  >
+                    Unblock
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
       )}
 
       {/* ── Followers / Following modal ────────────────────────────────────── */}

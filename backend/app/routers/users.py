@@ -15,10 +15,12 @@ from app.core.redis import redis
 
 USERNAME_RE = re.compile(r'^[a-zA-Z0-9_]{3,30}$')
 
+from app.core.blocks import block_state, blocked_user_ids, is_blocked_pair
 from app.core.constants import FACULTIES
 from app.core.notify import push_live
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.models.block import Block
 from app.models.club import Club
 from app.models.club_member import ClubMember
 from app.models.follow import Follow
@@ -54,6 +56,21 @@ async def _get_active_user(username: str, db: AsyncSession) -> User:
     return user
 
 
+async def _get_visible_user(username: str, current_user: User, db: AsyncSession) -> User:
+    """Like _get_active_user, but a blocked user simply doesn't exist.
+
+    404 (not 403) is deliberate and mutual: the blocked side can't tell a block
+    apart from a deleted account, so blocking never notifies the person blocked.
+    Use this for every read/interact path; the block and report endpoints use
+    _get_active_user instead, since you must still be able to block or report
+    someone who blocked you first.
+    """
+    target = await _get_active_user(username, db)
+    if await is_blocked_pair(db, current_user.id, target.id):
+        raise HTTPException(status_code=404, detail="User not found.")
+    return target
+
+
 async def _follow_counts(user_id: uuid.UUID, db: AsyncSession) -> tuple[int, int]:
     followers = (await db.execute(
         select(func.count()).where(Follow.following_id == user_id)
@@ -80,14 +97,19 @@ async def search_users(
         return []
 
     pattern = f"%{q}%"
+    where = [
+        User.is_active == True,
+        User.is_email_verified == True,
+        User.id != current_user.id,
+        or_(User.username.ilike(pattern), User.display_name.ilike(pattern)),
+    ]
+    hidden = await blocked_user_ids(db, current_user.id)
+    if hidden:
+        where.append(User.id.notin_(hidden))
+
     users = (await db.execute(
         select(User)
-        .where(
-            User.is_active == True,
-            User.is_email_verified == True,
-            User.id != current_user.id,
-            or_(User.username.ilike(pattern), User.display_name.ilike(pattern)),
-        )
+        .where(*where)
         .order_by(User.display_name)
         .limit(limit)
     )).scalars().all()
@@ -272,6 +294,31 @@ async def get_profile(
 ):
     target = await _get_active_user(username, db)
 
+    # Directional: the person who blocked keeps a viewable (emptied) profile so
+    # they can undo it here; the person blocked sees a plain 404 and is never
+    # told a block exists.
+    i_blocked, they_blocked_me = await block_state(db, current_user.id, target.id)
+    if they_blocked_me:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if i_blocked:
+        return {
+            "username": target.username,
+            "display_name": target.display_name,
+            "bio": None,
+            "faculty": None,
+            "program": None,
+            "avatar_url": target.avatar_url,
+            "member_since": target.created_at.isoformat(),
+            "post_count": 0,
+            "club_count": 0,
+            "follower_count": 0,
+            "following_count": 0,
+            "is_following": False,
+            "is_own_profile": False,
+            "is_blocked": True,
+            "username_changed_at": None,
+        }
+
     post_count = (await db.execute(
         select(func.count(Post.id)).where(
             Post.author_id == target.id,
@@ -310,6 +357,7 @@ async def get_profile(
         "following_count": following_count,
         "is_following": is_following,
         "is_own_profile": target.id == current_user.id,
+        "is_blocked": False,
         "username_changed_at": target.username_changed_at.isoformat() if target.username_changed_at else None,
     }
 
@@ -321,7 +369,7 @@ async def get_user_posts(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[PostResponse]:
-    target = await _get_active_user(username, db)
+    target = await _get_visible_user(username, current_user, db)
 
     where = and_(
         Post.author_id == target.id,
@@ -343,7 +391,7 @@ async def get_user_clubs(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    target = await _get_active_user(username, db)
+    target = await _get_visible_user(username, current_user, db)
 
     rows = (await db.execute(
         select(Club, ClubMember.role)
@@ -391,7 +439,7 @@ async def get_followers(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    target = await _get_active_user(username, db)
+    target = await _get_visible_user(username, current_user, db)
     rows = (await db.execute(
         select(User)
         .join(Follow, Follow.follower_id == User.id)
@@ -407,7 +455,7 @@ async def get_following(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    target = await _get_active_user(username, db)
+    target = await _get_visible_user(username, current_user, db)
     rows = (await db.execute(
         select(User)
         .join(Follow, Follow.following_id == User.id)
@@ -423,7 +471,7 @@ async def follow_user(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    target = await _get_active_user(username, db)
+    target = await _get_visible_user(username, current_user, db)
     if target.id == current_user.id:
         raise HTTPException(status_code=400, detail="You cannot follow yourself.")
 
@@ -466,7 +514,7 @@ async def unfollow_user(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    target = await _get_active_user(username, db)
+    target = await _get_visible_user(username, current_user, db)
 
     existing = (await db.execute(
         select(Follow).where(
@@ -501,3 +549,96 @@ async def report_user(
     ))
     await db.commit()
     return {"ok": True}
+
+
+# ── blocking ──────────────────────────────────────────────────────────────────
+
+@router.get("/me/blocked")
+async def list_blocked(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """People *you* blocked (not people who blocked you — that stays invisible).
+    Backs the Settings list, which is the reliable place to undo a block."""
+    rows = (await db.execute(
+        select(User, Block.created_at)
+        .join(Block, Block.blocked_id == User.id)
+        .where(Block.blocker_id == current_user.id)
+        .order_by(Block.created_at.desc())
+    )).all()
+    return [
+        {
+            "username": u.username,
+            "display_name": u.display_name,
+            "avatar_url": u.avatar_url,
+            "blocked_at": created_at.isoformat(),
+        }
+        for u, created_at in rows
+    ]
+
+
+@router.post("/{username}/block", status_code=status.HTTP_204_NO_CONTENT)
+async def block_user(
+    username: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Block someone. Deliberately uses _get_active_user, not _get_visible_user:
+    if they blocked you first you must still be able to block them back.
+
+    Blocking severs the existing relationship in both directions — follows are
+    dropped and any notification either of you generated for the other is
+    deleted, so the bell can't keep surfacing someone you just blocked. The
+    person blocked is never notified.
+    """
+    target = await _get_active_user(username, db)
+    if target.id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot block yourself.")
+
+    existing = (await db.execute(
+        select(Block).where(
+            Block.blocker_id == current_user.id, Block.blocked_id == target.id
+        )
+    )).scalar_one_or_none()
+    if existing:
+        return  # idempotent
+
+    db.add(Block(blocker_id=current_user.id, blocked_id=target.id))
+
+    for follow in (await db.execute(
+        select(Follow).where(or_(
+            and_(Follow.follower_id == current_user.id, Follow.following_id == target.id),
+            and_(Follow.follower_id == target.id, Follow.following_id == current_user.id),
+        ))
+    )).scalars().all():
+        await db.delete(follow)
+
+    for notif in (await db.execute(
+        select(Notification).where(or_(
+            and_(Notification.user_id == current_user.id, Notification.actor_id == target.id),
+            and_(Notification.user_id == target.id, Notification.actor_id == current_user.id),
+        ))
+    )).scalars().all():
+        await db.delete(notif)
+
+    await db.commit()
+
+
+@router.delete("/{username}/block", status_code=status.HTTP_204_NO_CONTENT)
+async def unblock_user(
+    username: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Undo your own block. Follows and notifications deleted at block time are
+    not restored — unblocking reopens contact, it doesn't rewind history."""
+    target = await _get_active_user(username, db)
+
+    existing = (await db.execute(
+        select(Block).where(
+            Block.blocker_id == current_user.id, Block.blocked_id == target.id
+        )
+    )).scalar_one_or_none()
+    if existing:
+        await db.delete(existing)
+        await db.commit()

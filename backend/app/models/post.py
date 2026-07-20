@@ -35,6 +35,11 @@ class Post(Base):
     is_anonymous: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default=text("false"))
     poll_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # An event is a club post with a time and place attached; NULL start = not
+    # an event. Set at creation and immutable, like poll options.
+    event_starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    event_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    event_location: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # Set at creation, never mutated: a poll must not flip from anonymous to
     # public after votes exist. Only club posts ever set this.
     poll_public_votes: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default=text("false"))
