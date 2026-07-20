@@ -135,6 +135,7 @@ function notifText(n: FollowNotif): string {
   if (n.type === "reply") return " replied to your post";
   if (n.type.startsWith("milestone_")) return `Your post reached ${n.type.slice("milestone_".length)} upvotes`;
   if (n.type === "qa_answer") return "Your anonymous question got a new answer";
+  if (n.type === "club_event") return ` scheduled an event in ${club}`;
   if (n.type === "club_join_request") return ` requested to join ${club}`;
   if (n.type === "club_approved") return ` accepted you into ${club}`;
   if (n.type === "club_role_moderator") return ` made you a moderator of ${club}`;

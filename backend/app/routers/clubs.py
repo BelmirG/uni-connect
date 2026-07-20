@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
@@ -12,12 +14,13 @@ from sqlalchemy.orm import aliased
 from app.core.blocks import blocked_user_ids, is_blocked_pair, visible_author_clause
 from app.core.notify import notify, push_live
 from app.core.redis import redis
-from app.database import get_db
+from app.database import AsyncSessionLocal, get_db
 from app.dependencies import get_current_user
 from app.models.club import Club
 from app.models.club_invitation import ClubInvitation
 from app.models.club_join_request import ClubJoinRequest
 from app.models.club_member import ClubMember
+from app.models.notification import Notification
 from app.models.post import Post
 from app.models.user import User
 from app.models.vote import Vote
@@ -33,6 +36,70 @@ from app.schemas.post import (
 from app.routers.posts import _create_poll_options, _load_events, _load_polls
 
 router = APIRouter(prefix="/api/clubs", tags=["clubs"])
+
+logger = logging.getLogger(__name__)
+
+# Keeps fan-out tasks referenced so the event loop can't garbage-collect a
+# notification mid-delivery (same pattern the chat push broadcast uses).
+_event_notify_tasks: set[asyncio.Task] = set()
+
+
+async def _notify_club_event(
+    post_id: uuid.UUID,
+    club_id: uuid.UUID,
+    club_name: str,
+    club_slug: str,
+    actor: dict,
+) -> None:
+    """Tell every other member that an event was scheduled.
+
+    Events get a full notification (bell row + toast + browser push) rather
+    than the push-only treatment club chat gets: they're rare, and the whole
+    point is that members find out in time to show up.
+
+    Runs detached with its own session so posting stays fast in a big club —
+    the poster shouldn't wait on N push deliveries to see their own post.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            hidden = await blocked_user_ids(db, actor["id"])
+            rows = (await db.execute(
+                select(User.id, User.muted_notifications)
+                .join(ClubMember, ClubMember.user_id == User.id)
+                .where(
+                    ClubMember.club_id == club_id,
+                    User.id != actor["id"],
+                    User.is_active == True,  # noqa: E712
+                )
+            )).all()
+            recipients = [(uid, muted) for uid, muted in rows if uid not in hidden]
+            if not recipients:
+                return
+
+            # One INSERT batch + one commit; notify() would commit per member.
+            for user_id, _ in recipients:
+                db.add(Notification(
+                    user_id=user_id,
+                    actor_id=actor["id"],
+                    type="club_event",
+                    reference_id=post_id,
+                ))
+            await db.commit()
+
+            base = {
+                "type": "club_event",
+                "actor_username": actor["username"],
+                "actor_display_name": actor["display_name"],
+                "actor_avatar_url": actor["avatar_url"],
+                "club_name": club_name,
+                "club_slug": club_slug,
+                "post_id": str(post_id),
+            }
+            for user_id, muted in recipients:
+                # Muted "clubs" → still in the bell, but no popup or push banner.
+                await push_live(db, user_id, {**base, "silent": "clubs" in (muted or [])})
+    except Exception as exc:
+        logger.warning("club event notification fan-out failed: %s", exc)
 
 
 # ── slug helpers ──────────────────────────────────────────────────────────────
@@ -524,6 +591,20 @@ async def create_club_post(
     await db.refresh(post)
 
     event = (await _load_events([post.id], current_user.id, db)).get(post.id)
+
+    # Only events notify the club — ordinary club posts stay ambient by design.
+    if post.event_starts_at is not None:
+        task = asyncio.create_task(_notify_club_event(
+            post.id, club.id, club.name, club.slug,
+            {
+                "id": current_user.id,
+                "username": current_user.username,
+                "display_name": current_user.display_name,
+                "avatar_url": current_user.avatar_url,
+            },
+        ))
+        _event_notify_tasks.add(task)
+        task.add_done_callback(_event_notify_tasks.discard)
 
     return PostResponse(
         id=post.id,

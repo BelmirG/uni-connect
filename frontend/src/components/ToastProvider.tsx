@@ -11,7 +11,7 @@ interface NotifPayload {
   type:
     | "follow" | "club_invite" | "dm" | "mention" | "chat_mention"
     | "reply" | "milestone" | "qa_answer"
-    | "club_join_request" | "club_approved" | "club_role";
+    | "club_join_request" | "club_approved" | "club_role" | "club_event";
   // Absent on system notifications (milestone, qa_answer) — nobody's identity rides along.
   actor_username?: string;
   actor_display_name?: string;
@@ -53,7 +53,7 @@ function toastHref(p: NotifPayload): string {
   if ((p.type === "mention" || p.type === "reply" || p.type === "milestone") && p.post_id) return `/feed/${p.post_id}`;
   if (p.type === "qa_answer" && p.post_id) return `/qa/${p.post_id}`;
   if (p.type === "chat_mention" && p.club_slug) return `/clubs/${p.club_slug}/chat`;
-  if ((p.type === "club_join_request" || p.type === "club_approved" || p.type === "club_role") && p.club_slug) return `/clubs/${p.club_slug}`;
+  if ((p.type === "club_join_request" || p.type === "club_approved" || p.type === "club_role" || p.type === "club_event") && p.club_slug) return `/clubs/${p.club_slug}`;
   return `/profile/${p.actor_username}`;
 }
 
@@ -101,6 +101,18 @@ function ToastContent({ p }: { p: NotifPayload }) {
         </p>
         <p className="text-xs text-muted-foreground truncate leading-snug mt-0.5">
           Invited you to {p.club_name}
+        </p>
+      </div>
+    );
+  }
+  if (p.type === "club_event") {
+    return (
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-foreground truncate leading-tight">
+          {p.club_name}
+        </p>
+        <p className="text-xs text-muted-foreground truncate leading-snug mt-0.5">
+          {p.actor_display_name} scheduled an event
         </p>
       </div>
     );

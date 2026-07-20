@@ -10,10 +10,15 @@ down are the ones that aren't obvious from the post machinery it reuses:
 3. Events are club-only — the feed endpoint ignores the fields rather than
    quietly creating an event nobody can RSVP to.
 """
+import asyncio
+import uuid
 from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import select
 
 from app.models.club import Club
 from app.models.club_member import ClubMember
+from app.models.notification import Notification
 
 
 async def _club_with_members(db, owner, *members):
@@ -122,6 +127,61 @@ async def test_events_are_club_only(client_for, make_user):
         "content": "feed post", "event_starts_at": _future(12),
     })).json()
     assert post["event"] is None
+
+
+async def test_creating_an_event_notifies_the_other_members(client_for, make_user, db):
+    """Members need to hear about an event in time to show up — the one club
+    activity that earns a notification. The creator is never notified, and a
+    plain club post still notifies nobody."""
+    owner, member, other = await make_user(), await make_user(), await make_user()
+    club = await _club_with_members(db, owner, member, other)
+    owner_c = client_for(owner)
+
+    await owner_c.post(f"/api/clubs/{club.slug}/posts", json={"content": "just a post"})
+    await asyncio.sleep(0.2)  # fan-out runs detached from the request
+    # Scoped to this test's members — the suite shares one database, so a
+    # global count would pick up events other tests created.
+    assert (await db.execute(
+        select(Notification).where(
+            Notification.type == "club_event",
+            Notification.user_id.in_([member.id, other.id]),
+        )
+    )).scalars().all() == []
+
+    r = await owner_c.post(f"/api/clubs/{club.slug}/posts", json={
+        "content": "Movie night", "event_starts_at": _future(24),
+    })
+    post_id = uuid.UUID(r.json()["id"])
+    await asyncio.sleep(0.2)
+
+    rows = (await db.execute(
+        select(Notification).where(
+            Notification.type == "club_event", Notification.reference_id == post_id
+        )
+    )).scalars().all()
+    assert {n.user_id for n in rows} == {member.id, other.id}
+    assert all(n.actor_id == owner.id for n in rows)
+
+
+async def test_blocked_member_is_not_notified_of_an_event(client_for, make_user, db):
+    owner, member = await make_user(), await make_user()
+    club = await _club_with_members(db, owner, member)
+    owner_c = client_for(owner)
+
+    assert (await owner_c.post(f"/api/users/{member.username}/block")).status_code == 204
+
+    r = await owner_c.post(f"/api/clubs/{club.slug}/posts", json={
+        "content": "Movie night", "event_starts_at": _future(24),
+    })
+    post_id = uuid.UUID(r.json()["id"])
+    await asyncio.sleep(0.2)
+
+    rows = (await db.execute(
+        select(Notification).where(
+            Notification.type == "club_event", Notification.reference_id == post_id
+        )
+    )).scalars().all()
+    assert rows == []
 
 
 async def test_private_club_event_hidden_from_non_members(client_for, make_user, db):

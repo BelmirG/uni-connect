@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -48,15 +48,18 @@ async def get_notifications(
     await db.commit()
 
     Actor = aliased(User)
-    # reference_id can point at a post ("mention", "reply", …) or a club
-    # ("chat_mention", "club_*"); resolve both so the UI can deep-link without
-    # extra requests. The actor join is OUTER because system notifications
-    # (milestones, anonymous Q&A answers) deliberately have no actor.
+    # reference_id can point at a post ("mention", "reply", "club_event", …) or
+    # a club ("chat_mention", most "club_*"); resolve both so the UI can
+    # deep-link without extra requests. The club join also reaches through the
+    # post's club_id — "club_event" references the event post, but the place to
+    # send someone is the club feed where the event card and its RSVP live.
+    # The actor join is OUTER because system notifications (milestones,
+    # anonymous Q&A answers) deliberately have no actor.
     base = (
         select(Notification, Actor, Post.post_type, Club.slug, Club.name)
         .outerjoin(Actor, Actor.id == Notification.actor_id)
         .outerjoin(Post, Post.id == Notification.reference_id)
-        .outerjoin(Club, Club.id == Notification.reference_id)
+        .outerjoin(Club, or_(Club.id == Notification.reference_id, Club.id == Post.club_id))
         .where(Notification.user_id == current_user.id)
     )
     total = (await db.execute(
